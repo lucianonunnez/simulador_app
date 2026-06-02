@@ -1,0 +1,29 @@
+# ============================================================================
+# Configuración visual y de servidor de Streamlit
+# ============================================================================
+
+[theme]
+# Paleta Swiss Medical
+primaryColor = "#E4002B"
+backgroundColor = "#F8F9FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#212529"
+font = "sans serif"
+
+[server]
+# Max upload size (MB). HF respeta este valor.
+maxUploadSize = 200
+
+# CORS: HF lo maneja a nivel proxy, lo dejamos off
+enableCORS = false
+
+# XSRF: DEBE estar en false en HF Spaces + Docker.
+# En este entorno el proxy de HF no reenvía bien los tokens XSRF,
+# provocando 403 Forbidden en st.file_uploader.
+# Ref: https://discuss.huggingface.co/t/axioserror-request-failed-with-status-code-403-when-uploading-a-file-with-streamlit/166694
+# El Space es privado y está protegido por login, así que desactivar
+# XSRF no aumenta materialmente el riesgo.
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false

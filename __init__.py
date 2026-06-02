@@ -1,0 +1,1 @@
+"""Lógica pura de negocio, sin dependencias de Streamlit."""

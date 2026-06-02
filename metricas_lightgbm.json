@@ -1,0 +1,89 @@
+{
+  "lightgbm_importe": {
+    "mae": 492655.063092563,
+    "r2": 0.6690038067060672,
+    "n_train": 42560,
+    "n_test": 12160,
+    "features": [
+      "fue_activo",
+      "lag_1",
+      "activo_lag_1",
+      "lag_2",
+      "activo_lag_2",
+      "lag_3",
+      "activo_lag_3",
+      "rolling_mean_3",
+      "rolling_std_3",
+      "rolling_mean_6",
+      "rolling_std_6",
+      "mes_num",
+      "trimestre",
+      "Nomenclador",
+      "Tipo Clase CM",
+      "Gama"
+    ],
+    "categorical_features": [
+      "Nomenclador",
+      "Tipo Clase CM",
+      "Gama"
+    ]
+  },
+  "lightgbm_precio": {
+    "mae": 56143.13886931313,
+    "r2": 0.44655632523095856,
+    "n_train": 42560,
+    "n_test": 12160,
+    "features": [
+      "fue_activo",
+      "lag_1",
+      "activo_lag_1",
+      "lag_2",
+      "activo_lag_2",
+      "lag_3",
+      "activo_lag_3",
+      "rolling_mean_3",
+      "rolling_std_3",
+      "rolling_mean_6",
+      "rolling_std_6",
+      "mes_num",
+      "trimestre",
+      "Nomenclador",
+      "Tipo Clase CM",
+      "Gama"
+    ],
+    "categorical_features": [
+      "Nomenclador",
+      "Tipo Clase CM",
+      "Gama"
+    ]
+  },
+  "lightgbm_cantidad": {
+    "mae": 6.306785042189696,
+    "r2": 0.9415569504516483,
+    "n_train": 42560,
+    "n_test": 12160,
+    "features": [
+      "fue_activo",
+      "lag_1",
+      "activo_lag_1",
+      "lag_2",
+      "activo_lag_2",
+      "lag_3",
+      "activo_lag_3",
+      "rolling_mean_3",
+      "rolling_std_3",
+      "rolling_mean_6",
+      "rolling_std_6",
+      "mes_num",
+      "trimestre",
+      "Nomenclador",
+      "Tipo Clase CM",
+      "Gama"
+    ],
+    "categorical_features": [
+      "Nomenclador",
+      "Tipo Clase CM",
+      "Gama"
+    ]
+  }
+}
