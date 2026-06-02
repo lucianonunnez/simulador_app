@@ -7,7 +7,12 @@ v0.5.2 — diseño Swiss Medical
 import streamlit as st
 
 from auth import require_login, render_logout, get_current_user
+from core.logging_config import setup_logging, get_logger
 from modules import module1, module2, module3
+
+# Inicializa el logging una sola vez (idempotente entre reruns de Streamlit).
+setup_logging()
+log = get_logger(__name__)
 
 # ============================================================================
 # CONFIGURACIÓN DE PÁGINA
