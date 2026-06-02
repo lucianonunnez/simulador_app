@@ -1,0 +1,22 @@
+# Mantener la imagen liviana y evitar filtrar secretos/datos al build context
+.git
+.gitattributes
+.github
+docs
+**/__pycache__
+*.pyc
+.venv
+venv
+.streamlit/secrets.toml
+secrets.toml
+data
+*.xlsx
+*.xls
+*.csv
+logs
+*.log
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+.DS_Store

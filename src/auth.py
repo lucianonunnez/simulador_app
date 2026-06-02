@@ -17,6 +17,10 @@ Gestión de usuarios:
 import streamlit as st
 import streamlit_authenticator as stauth
 
+from core.logging_config import audit, get_logger
+
+log = get_logger(__name__)
+
 
 def _build_authenticator() -> stauth.Authenticate:
     """
@@ -83,14 +87,21 @@ def require_login() -> None:
         st.stop()
 
     status = st.session_state.get("authentication_status")
+    username = st.session_state.get("username", "")
 
     if status is False:
+        # Intento fallido: se audita el username tipeado, nunca la contraseña.
+        audit("login_failure", username=username or "(desconocido)")
         st.error("❌ Usuario o contraseña incorrectos")
         st.stop()
     elif status is None:
         st.info("👆 Ingresá tus credenciales para continuar")
         st.stop()
-    # Si status es True, sigue la ejecución normal
+
+    # status True: login válido. Se audita una sola vez por sesión.
+    if not st.session_state.get("_login_audited"):
+        st.session_state["_login_audited"] = True
+        audit("login_success", username=username, role=get_current_user()["role"])
 
 
 def get_current_user() -> dict:
