@@ -100,7 +100,7 @@ def _load_from_local_file(path_str: str, _expected_cols: frozenset) -> Optional[
             content = f.read()
         return _load_excel_smart(content, set(_expected_cols))
     except Exception as e:
-        st.error(f"❌ Error leyendo archivo local {path.name}: {e}")
+        st.error(f"Error leyendo archivo local {path.name}: {e}")
         return None
 
 
@@ -177,12 +177,12 @@ def _load_from_upload(uploaded_file, expected_cols: set, label: str) -> Optional
         return None
 
     try:
-        with st.spinner(f"📥 Leyendo {label}..."):
+        with st.spinner(f"Leyendo {label}..."):
             content = uploaded_file.read()
             df = _load_excel_smart(content, expected_cols)
         return df
     except Exception as e:
-        st.error(f"❌ Error leyendo {label}: {e}")
+        st.error(f"Error leyendo {label}: {e}")
         return None
 
 
@@ -204,7 +204,7 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
     has_local_consumo, has_local_valores = _check_local_files()
 
     if has_local_consumo or has_local_valores:
-        with st.sidebar.expander("📂 Carga de datos", expanded=True):
+        with st.sidebar.expander("Carga de datos", expanded=True):
             if has_local_consumo:
                 with st.spinner("Leyendo Consumo desde carpeta local..."):
                     df_consumo = _load_from_local_file(
@@ -212,7 +212,7 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
                         frozenset(EXPECTED_CONSUMO_COLS),
                     )
                 if df_consumo is not None:
-                    st.success(f"💾 Consumo (local): {len(df_consumo):,} filas")
+                    st.success(f"Consumo (local): {len(df_consumo):,} filas")
 
             if has_local_valores:
                 with st.spinner("Leyendo Valores desde carpeta local..."):
@@ -221,7 +221,7 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
                         frozenset(EXPECTED_VALORES_COLS),
                     )
                 if df_valores is not None:
-                    st.success(f"💾 Valores (local): {len(df_valores):,} filas")
+                    st.success(f"Valores (local): {len(df_valores):,} filas")
 
         # Si ambos cargaron localmente, listo
         if df_consumo is not None and df_valores is not None:
@@ -231,7 +231,7 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
     onedrive_consumo = _get_secret("onedrive_consumo_url")
     onedrive_valores = _get_secret("onedrive_valores_url")
 
-    with st.sidebar.expander("📂 Carga de datos", expanded=True):
+    with st.sidebar.expander("Carga de datos", expanded=True):
         # ---- OneDrive: Consumo ----
         if df_consumo is None and onedrive_consumo:
             with st.spinner("Descargando Consumo desde OneDrive..."):
@@ -240,10 +240,10 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
                     frozenset(EXPECTED_CONSUMO_COLS),
                 )
             if df_consumo is not None:
-                st.success(f"☁️ Consumo (OneDrive): {len(df_consumo):,} filas")
+                st.success(f"Consumo (OneDrive): {len(df_consumo):,} filas")
             else:
                 st.warning(
-                    "⚠️ No se pudo descargar Consumo desde OneDrive. "
+                    "No se pudo descargar Consumo desde OneDrive. "
                     "Subilo manualmente abajo."
                 )
 
@@ -255,17 +255,17 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
                     frozenset(EXPECTED_VALORES_COLS),
                 )
             if df_valores is not None:
-                st.success(f"☁️ Valores (OneDrive): {len(df_valores):,} filas")
+                st.success(f"Valores (OneDrive): {len(df_valores):,} filas")
             else:
                 st.warning(
-                    "⚠️ No se pudo descargar Valores desde OneDrive. "
+                    "No se pudo descargar Valores desde OneDrive. "
                     "Subilo manualmente abajo."
                 )
 
         # ---- 3. Fallback: upload manual ----
         if df_consumo is None:
             st.divider()
-            st.caption("📄 Archivo de Consumo")
+            st.caption("Archivo de Consumo")
             up_c = st.file_uploader(
                 "Subir Consumo (xlsx)",
                 type=["xlsx"],
@@ -275,11 +275,11 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
             if up_c is not None:
                 df_consumo = _load_from_upload(up_c, EXPECTED_CONSUMO_COLS, "Consumo")
                 if df_consumo is not None:
-                    st.success(f"✅ Consumo cargado: {len(df_consumo):,} filas")
+                    st.success(f"Consumo cargado: {len(df_consumo):,} filas")
 
         if df_valores is None:
             st.divider()
-            st.caption("📄 Archivo de Valores")
+            st.caption("Archivo de Valores")
             up_v = st.file_uploader(
                 "Subir Valores (xlsx)",
                 type=["xlsx"],
@@ -289,7 +289,7 @@ def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.Data
             if up_v is not None:
                 df_valores = _load_from_upload(up_v, EXPECTED_VALORES_COLS, "Valores")
                 if df_valores is not None:
-                    st.success(f"✅ Valores cargado: {len(df_valores):,} filas")
+                    st.success(f"Valores cargado: {len(df_valores):,} filas")
 
     return df_consumo, df_valores
 

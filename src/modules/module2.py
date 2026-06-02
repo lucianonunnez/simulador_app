@@ -25,20 +25,20 @@ from ui.anomaly_tabs import render_tabs
 
 def render() -> None:
     """Entry point del Módulo 2."""
-    st.title(" Módulo 2 — Detección de Desvíos")
+    st.title("Módulo 2 — Detección de Desvíos")
 
     # --- Carga de datos (reusa caché del Módulo 1) ---
     df_consumo, _df_valores = load_consumo_and_valores()
 
     if df_consumo is None:
         st.info(
-            "⏳ **Esperando datos** — Subí `consumo.xlsx` desde el sidebar "
-            "(expandí la sección **📂 Carga de datos**). "
+            "**Esperando datos** — Subí `consumo.xlsx` desde el sidebar "
+            "(expandí la sección **Carga de datos**). "
             "Si ya lo cargaste en el Módulo 1, debería aparecer automáticamente."
         )
         return
 
-    st.caption(f"📊 Analizando **{len(df_consumo):,}** registros")
+    st.caption(f"Analizando **{len(df_consumo):,}** registros")
 
     # --- Normalizar tipos (mismo helper que Módulo 1) ---
     df_consumo, _ = normalize_dataframes(df_consumo, df_consumo.iloc[:0])

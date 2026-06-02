@@ -19,7 +19,6 @@ log = get_logger(__name__)
 # ============================================================================
 st.set_page_config(
     page_title="Simulador Costo Médico",
-    page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -195,7 +194,7 @@ user = get_current_user()
 with st.sidebar:
     st.markdown(f"""
     <div style="padding: 8px 0 16px 0;">
-        <div style="font-size:15px; font-weight:700; color:#212529;">👤 {user['name']}</div>
+        <div style="font-size:15px; font-weight:700; color:#212529;">{user['name']}</div>
         <div style="font-size:12px; color:#797979;">Conectado como <code>{user['username']}</code></div>
     </div>
     """, unsafe_allow_html=True)
@@ -249,7 +248,6 @@ if modulo == "Inicio":
     with c1:
         st.markdown(f"""
         <div style="{card_style}{accent}">
-            <div style="font-size:28px; margin-bottom:12px;">📊</div>
             <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
                 Módulo 1 — Simulador
             </div>
@@ -263,7 +261,6 @@ if modulo == "Inicio":
     with c2:
         st.markdown(f"""
         <div style="{card_style}{accent}">
-            <div style="font-size:28px; margin-bottom:12px;">🔍</div>
             <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
                 Módulo 2 — Desvíos
             </div>
@@ -277,7 +274,6 @@ if modulo == "Inicio":
     with c3:
         st.markdown(f"""
         <div style="{card_style}{accent}">
-            <div style="font-size:28px; margin-bottom:12px;">🤖</div>
             <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
                 Módulo 3 — Predicción ML
             </div>

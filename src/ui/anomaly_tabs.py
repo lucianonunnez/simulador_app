@@ -152,7 +152,7 @@ def _render_comparativa(df: pd.DataFrame, config: dict, prest_data: list[dict]) 
                 df_res[col] = df_res[col].apply(fmt)
         st.dataframe(df_res, use_container_width=True, hide_index=True)
         csv = df_res.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Descargar comparativa (CSV)", csv, "comparativa_prestadores.csv", "text/csv")
+        st.download_button("Descargar comparativa (CSV)", csv, "comparativa_prestadores.csv", "text/csv")
 
 
 # ============================================================================
@@ -256,7 +256,7 @@ def _tab_ranking(df: pd.DataFrame, config: dict) -> None:
         )
 
     if len(ranking) == 0:
-        st.success("✅ No se detectaron alertas con los parámetros actuales")
+        st.success("No se detectaron alertas con los parámetros actuales")
         return
 
     st.metric("Alertas detectadas", len(ranking))
@@ -278,7 +278,7 @@ def _tab_ranking(df: pd.DataFrame, config: dict) -> None:
 
     st.dataframe(display[show_cols], use_container_width=True, hide_index=True)
     csv = display[show_cols].to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Descargar alertas (CSV)", csv,
+    st.download_button("Descargar alertas (CSV)", csv,
                        f"alertas_{config['metric']}.csv", "text/csv")
 
 
@@ -403,7 +403,7 @@ def _render_temporal_view(
         st.dataframe(display[["Mes", "Valor real", "Esperado", "Desvío %"]],
                      use_container_width=True, hide_index=True)
     else:
-        st.success("✅ No se detectaron anomalías con los parámetros actuales.")
+        st.success("No se detectaron anomalías con los parámetros actuales.")
 
     if config["analysis_type"] in ("estructural", "ambos"):
         st.divider()

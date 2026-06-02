@@ -38,7 +38,7 @@ def _metric_card(label: str, value: str, delta: str = "", delta_color: str = "#E
     ">
         <div style="font-size:11px; font-weight:600; color:#797979;
                     text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;">
-            {icon}&nbsp;{label}
+            {label}
         </div>
         <div style="font-size:28px; font-weight:700; color:#212529; line-height:1.1;">
             {value}
@@ -64,17 +64,17 @@ def _render_metrics(total_ideal: float, total_sim: float, dif: float, pct: float
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        _metric_card("Consumo Ideal", fmt_ideal, icon="💰")
+        _metric_card("Consumo Ideal", fmt_ideal, icon="")
     with c2:
-        _metric_card("Consumo Simulado", fmt_sim, icon="📈")
+        _metric_card("Consumo Simulado", fmt_sim, icon="")
     with c3:
         _metric_card("Diferencia", fmt_dif,
                      delta=f"{delta_icon} {fmt_pct}",
-                     delta_color=delta_color, icon="📊")
+                     delta_color=delta_color, icon="")
     with c4:
         _metric_card("Impacto Total", fmt_imp,
                      delta=f"sobre {n_meses} mes(es)",
-                     delta_color="#797979", icon="⚡")
+                     delta_color="#797979", icon="")
 
     st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
 
@@ -139,7 +139,7 @@ def render() -> None:
     st.caption(f"Período analizado: **{n_meses} mes(es)** · {len(df_simulated):,} registros")
     _render_metrics(total_ideal, total_sim, dif, pct, n_meses)
 
-    with st.expander("🤝 Tabla de Negociación — Valores por Prestación", expanded=True):
+    with st.expander("Tabla de Negociación — Valores por Prestación", expanded=True):
         st.caption("Valor actual vs. valor ofrecido por prestación.")
 
         cols_neg = ["Prestacion ID", "Prestacion Desc", "Nomenclador",
@@ -157,7 +157,7 @@ def render() -> None:
 
         st.dataframe(df_neg_display, use_container_width=True, hide_index=True)
         csv = df_neg.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Descargar tabla de negociación", csv, "negociacion.csv", "text/csv")
+        st.download_button("Descargar tabla de negociación", csv, "negociacion.csv", "text/csv")
 
     st.divider()
 
@@ -174,36 +174,36 @@ def render() -> None:
 # ============================================================================
 
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
-    st.info("⏳ **Esperando datos** — Subí los archivos desde el sidebar.")
+    st.info("**Esperando datos** — Subí los archivos desde el sidebar.")
     st.markdown(f"""
-    - {"✅" if consumo_loaded else "⬜"} **Archivo de Consumo** (`consumo.xlsx`)
-    - {"✅" if valores_loaded else "⬜"} **Archivo de Valores** (`valores.xlsx`)
+    - {"" if consumo_loaded else ""} **Archivo de Consumo** (`consumo.xlsx`)
+    - {"" if valores_loaded else ""} **Archivo de Valores** (`valores.xlsx`)
     """)
 
 
 def _process_with_feedback(
     df_consumo: pd.DataFrame, df_valores: pd.DataFrame
 ) -> pd.DataFrame | None:
-    with st.status("⚙️ Procesando datos...", expanded=True, state="running") as status:
-        st.write(f"📄 Consumo leído → **{len(df_consumo):,}** filas")
+    with st.status("Procesando datos...", expanded=True, state="running") as status:
+        st.write(f"Consumo leído → **{len(df_consumo):,}** filas")
         time.sleep(0.15)
-        st.write(f"📄 Valores leído → **{len(df_valores):,}** filas")
+        st.write(f"Valores leído → **{len(df_valores):,}** filas")
         time.sleep(0.15)
-        st.write("🔄 Normalizando tipos de datos...")
+        st.write("Normalizando tipos de datos...")
         df_consumo, df_valores = normalize_dataframes(df_consumo, df_valores)
-        st.write("✅ Normalización completa")
+        st.write("Normalización completa")
         time.sleep(0.15)
-        st.write("🔗 Uniendo datasets...")
+        st.write("Uniendo datasets...")
         df_merged = merge_datasets(df_consumo, df_valores)
 
         if len(df_merged) == 0:
-            status.update(label="❌ Error en el procesamiento", state="error", expanded=True)
-            st.write("❌ **No se encontraron coincidencias entre Consumo y Valores.**")
+            status.update(label="Error en el procesamiento", state="error", expanded=True)
+            st.write("**No se encontraron coincidencias entre Consumo y Valores.**")
             return None
 
-        st.write(f"✅ Merge completo → **{len(df_merged):,}** registros")
+        st.write(f"Merge completo → **{len(df_merged):,}** registros")
         status.update(
-            label=f"✅ Datos listos ({len(df_merged):,} registros)",
+            label=f"Datos listos ({len(df_merged):,} registros)",
             state="complete", expanded=False,
         )
     return df_merged

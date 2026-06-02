@@ -26,7 +26,7 @@ def render_anomaly_controls() -> dict:
     """
     config = {}
 
-    with st.sidebar.expander("🔍 Configuración de Detección", expanded=True):
+    with st.sidebar.expander("Configuración de Detección", expanded=True):
 
         # --- Tipo de análisis ---
         analysis_label = st.radio(
@@ -66,7 +66,7 @@ def render_anomaly_controls() -> dict:
 
     # --- Parámetros temporales ---
     if config["analysis_type"] in ("temporal", "ambos"):
-        with st.sidebar.expander("📉 Parámetros — Análisis Temporal", expanded=True):
+        with st.sidebar.expander("Parámetros — Análisis Temporal", expanded=True):
             temporal_method_label = st.radio(
                 "Método",
                 ["Z-score", "IQR"],
@@ -111,7 +111,7 @@ def render_anomaly_controls() -> dict:
 
     # --- Parámetros estructurales ---
     if config["analysis_type"] in ("estructural", "ambos"):
-        with st.sidebar.expander("🏘️ Parámetros — Análisis Estructural", expanded=True):
+        with st.sidebar.expander("Parámetros — Análisis Estructural", expanded=True):
             structural_method_label = st.radio(
                 "Método",
                 ["Percentil", "Z-score vs pares"],
@@ -151,7 +151,7 @@ def render_anomaly_controls() -> dict:
         config["threshold_structural"] = 90.0
 
     # --- Nota sobre ML ---
-    with st.sidebar.expander("🤖 Detección con ML", expanded=False):
+    with st.sidebar.expander("Detección con ML", expanded=False):
         st.info(
             "La detección basada en modelo LightGBM se agrega en el **Hito 5**, "
             "cuando tengamos el modelo entrenado. Por ahora usamos solo métodos "

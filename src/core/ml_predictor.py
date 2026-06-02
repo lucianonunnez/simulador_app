@@ -44,7 +44,7 @@ MODELS = ["lightgbm", "pablo_corregido"]
 # ============================================================================
 # CARGA DE MODELOS (con caché)
 # ============================================================================
-@st.cache_resource(show_spinner="🔵 Cargando LightGBM...")
+@st.cache_resource(show_spinner="Cargando LightGBM...")
 def load_lightgbm(metric: Literal["importe", "precio", "cantidad"]):
     """Carga un modelo LightGBM entrenado."""
     import lightgbm as lgb
@@ -56,7 +56,7 @@ def load_lightgbm(metric: Literal["importe", "precio", "cantidad"]):
     return booster
 
 
-@st.cache_resource(show_spinner="🧠 Cargando red neuronal...")
+@st.cache_resource(show_spinner="Cargando red neuronal...")
 def load_pablo(metric: Literal["importe", "precio", "cantidad"]):
     """Carga modelo Pablo corregido + sus scalers."""
     from tensorflow.keras.models import load_model
@@ -79,7 +79,7 @@ def load_pablo(metric: Literal["importe", "precio", "cantidad"]):
     return model, scalers["scaler_X"], scalers["scaler_y"]
 
 
-@st.cache_data(show_spinner="📊 Cargando métricas...")
+@st.cache_data(show_spinner="Cargando métricas...")
 def load_metricas() -> dict:
     """Carga el JSON de métricas (MAE, R², features, etc.)."""
     path = MODELS_DIR / "metricas_final.json"
