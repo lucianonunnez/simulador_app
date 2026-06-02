@@ -72,11 +72,24 @@ amenazas y los controles implementados.
 > 3. Opcionalmente, purgar el historial (`git filter-repo`) si la política de la
 >    organización lo exige.
 
-Procedimiento de rotación de `cookie_key`:
+Procedimiento de rotación (con el helper del repo):
+
+```bash
+pip install bcrypt
+
+# cookie_key nueva + un usuario con contraseña hasheada
+python scripts/gen_credentials.py --cookie-key \
+    --user luciano --name "Luciano Núñez" --email luciano@ejemplo.com --role admin
+```
+
+El script imprime el bloque listo para pegar en `.streamlit/secrets.toml`
+(la contraseña se pide de forma interactiva y no se muestra). Tras actualizar
+el archivo, reiniciar la app para invalidar las sesiones anteriores.
+
+Alternativa mínima solo para la `cookie_key`:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
-# pegar el valor en .streamlit/secrets.toml (o en los secrets del despliegue)
 ```
 
 ## 5. Checklist antes de cada release
