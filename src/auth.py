@@ -40,7 +40,7 @@ def _build_authenticator() -> stauth.Authenticate:
     """
     if "credentials" not in st.secrets:
         st.error(
-            "⚠️ Faltan credenciales configuradas. "
+            "Faltan credenciales configuradas. "
             "Pedile al administrador que complete `secrets.toml`."
         )
         st.stop()
@@ -92,10 +92,10 @@ def require_login() -> None:
     if status is False:
         # Intento fallido: se audita el username tipeado, nunca la contraseña.
         audit("login_failure", username=username or "(desconocido)")
-        st.error("❌ Usuario o contraseña incorrectos")
+        st.error("Usuario o contraseña incorrectos")
         st.stop()
     elif status is None:
-        st.info("👆 Ingresá tus credenciales para continuar")
+        st.info("Ingresá tus credenciales para continuar")
         st.stop()
 
     # status True: login válido. Se audita una sola vez por sesión.
@@ -136,4 +136,4 @@ def render_logout() -> None:
     """Renderiza el botón de cerrar sesión. Llamar desde el sidebar."""
     authenticator = st.session_state.get("_authenticator")
     if authenticator is not None:
-        authenticator.logout(button_name="🚪 Cerrar sesión", location="sidebar")
+        authenticator.logout(button_name="Cerrar sesión", location="sidebar")

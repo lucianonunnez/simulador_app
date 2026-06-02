@@ -496,7 +496,7 @@ def _tab_datos(df: pd.DataFrame) -> None:
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     csv = df[cols_show].to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Descargar datos (CSV)", csv, "simulacion.csv", "text/csv")
+    st.download_button("Descargar datos (CSV)", csv, "simulacion.csv", "text/csv")
 
 
 # ----------------------------------------------------------------------------
@@ -523,11 +523,11 @@ def _tab_analisis(df: pd.DataFrame) -> None:
     with c1:
         st.write("### Impacto Financiero")
         if pct > 0:
-            st.success(f"✅ Aumento proyectado: **{format_currency(dif)}** ({pct:+.2f}%)")
+            st.success(f"Aumento proyectado: **{format_currency(dif)}** ({pct:+.2f}%)")
         elif pct < 0:
-            st.warning(f"⬇️ Reducción proyectada: **{format_currency(abs(dif))}** ({pct:.2f}%)")
+            st.warning(f"Reducción proyectada: **{format_currency(abs(dif))}** ({pct:.2f}%)")
         else:
-            st.info("➡️ Sin cambio respecto del valor actual")
+            st.info("Sin cambio respecto del valor actual")
 
     with c2:
         st.write("### Top Categorías")

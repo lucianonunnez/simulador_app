@@ -1,6 +1,5 @@
 ---
 title: Simulador Costo Médico
-emoji: 🏥
 colorFrom: blue
 colorTo: purple
 sdk: docker
@@ -9,36 +8,36 @@ pinned: false
 license: other
 ---
 
-# 🏥 Simulador de Costo Médico
+# Simulador de Costo Médico
 
 Plataforma interna de análisis, proyección y detección de desvíos sobre el
 costo médico. Pensada para que los equipos ejecutivos y de administración de
 prestadores puedan **simular escenarios de aumentos**, **detectar anomalías de
-gasto** y **proyectar el costo futuro con modelos de machine learning**, todo
-sobre los mismos datos y con una experiencia unificada.
+gasto** y **proyectar el costo futuro con modelos de machine learning**, sobre
+un mismo conjunto de datos.
 
 > Aplicación de uso interno. El acceso requiere autenticación y los datos de
-> negocio nunca se versionan en el repositorio (ver [Seguridad](#-seguridad-de-datos)).
+> negocio nunca se versionan en el repositorio (ver [Seguridad](#seguridad-de-datos)).
 
 ---
 
-## 📑 Tabla de contenidos
+## Tabla de contenidos
 
-- [Funcionalidades](#-funcionalidades)
-- [Arquitectura](#-arquitectura)
-- [Estructura del repositorio](#-estructura-del-repositorio)
-- [Puesta en marcha local](#-puesta-en-marcha-local)
-- [Despliegue](#-despliegue)
-- [Configuración](#-configuración)
-- [Seguridad de datos](#-seguridad-de-datos)
-- [Logging y auditoría](#-logging-y-auditoría)
-- [Integración con IA (roadmap)](#-integración-con-ia-roadmap)
-- [Documentación](#-documentación)
-- [Equipo](#-equipo)
+- [Funcionalidades](#funcionalidades)
+- [Arquitectura](#arquitectura)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Puesta en marcha local](#puesta-en-marcha-local)
+- [Despliegue](#despliegue)
+- [Configuración](#configuración)
+- [Seguridad de datos](#seguridad-de-datos)
+- [Logging y auditoría](#logging-y-auditoría)
+- [Integración con IA (roadmap)](#integración-con-ia-roadmap)
+- [Documentación](#documentación)
+- [Equipo](#equipo)
 
 ---
 
-## ✨ Funcionalidades
+## Funcionalidades
 
 | Módulo | Descripción |
 | ------ | ----------- |
@@ -52,7 +51,7 @@ enriquecimiento con inflación oficial del **INDEC** (API de datos.gob.ar).
 
 ---
 
-## 🏗️ Arquitectura
+## Arquitectura
 
 La aplicación sigue una **arquitectura en capas** que separa estrictamente la
 lógica de negocio de la presentación:
@@ -101,7 +100,7 @@ datos) está en **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**.
 
 ---
 
-## 📂 Estructura del repositorio
+## Estructura del repositorio
 
 ```
 simulador_app/
@@ -150,7 +149,7 @@ simulador_app/
 
 ---
 
-## 🚀 Puesta en marcha local
+## Puesta en marcha local
 
 **Requisitos:** Python 3.11+.
 
@@ -179,17 +178,20 @@ La app queda disponible en `http://localhost:8501`.
 > `secrets.toml`, o simplemente subirlos desde la barra lateral. La carpeta
 > `data/` está en `.gitignore` y nunca se versiona.
 
-### Generar un usuario
+### Generar o rotar usuarios
+
+El repositorio incluye un helper que genera la `cookie_key` y los hashes bcrypt
+listos para pegar en `.streamlit/secrets.toml` (la contraseña se pide de forma
+interactiva y no se escribe a disco):
 
 ```bash
-python -c "import bcrypt; print(bcrypt.hashpw(b'MI_PASSWORD', bcrypt.gensalt()).decode())"
+python scripts/gen_credentials.py --cookie-key \
+    --user luciano --name "Luciano Núñez" --email luciano@ejemplo.com --role admin
 ```
-
-Pegá el hash resultante en `.streamlit/secrets.toml`.
 
 ---
 
-## 📦 Despliegue
+## Despliegue
 
 El proyecto se empaqueta con **Docker** y está preparado para **Hugging Face
 Spaces** (SDK `docker`, puerto `8501`):
@@ -207,7 +209,7 @@ endpoint de salud de Streamlit.
 
 ---
 
-## ⚙️ Configuración
+## Configuración
 
 | Variable de entorno | Default | Descripción |
 | ------------------- | ------- | ----------- |
@@ -221,7 +223,7 @@ y las credenciales/orígenes de datos en `.streamlit/secrets.toml`.
 
 ---
 
-## 🔐 Seguridad de datos
+## Seguridad de datos
 
 La seguridad es un requisito de primer orden (datos sensibles del negocio):
 
@@ -239,17 +241,17 @@ Política completa, modelo de amenazas y checklist en
 
 ---
 
-## 📋 Logging y auditoría
+## Logging y auditoría
 
 Logging **estructurado y centralizado** (`core/logging_config.py`) con dos
 canales: operación (`simulador.*`) y **auditoría** (`simulador.audit`) para
 eventos relevantes a seguridad/compliance (login, carga de datos, exportación,
-carga de modelos). Formato conmutables a JSON para ingestión por un colector.
+carga de modelos). Formato conmutable a JSON para ingestión por un colector.
 Detalle en **[`docs/LOGGING.md`](docs/LOGGING.md)**.
 
 ---
 
-## 🤖 Integración con IA (roadmap)
+## Integración con IA (roadmap)
 
 Más allá de los modelos predictivos actuales, el proyecto contempla un
 **copiloto analítico** en lenguaje natural sobre los resultados de cada módulo.
@@ -260,7 +262,7 @@ defecto**, con lazy import del SDK, prompt caching y envío de datos agregados
 
 ---
 
-## 📚 Documentación
+## Documentación
 
 | Documento | Contenido |
 | --------- | --------- |
@@ -273,7 +275,7 @@ defecto**, con lazy import del SDK, prompt caching y envío de datos agregados
 
 ---
 
-## 👥 Equipo
+## Equipo
 
 Producto interno mantenido por el equipo de **Análisis y Administración
 Operativa de Prestadores**. Para acceso, alta de usuarios o reporte de

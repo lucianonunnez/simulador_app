@@ -32,11 +32,11 @@ METRIC_LABEL = {
 
 def render_tabs(df_consumo: pd.DataFrame, config: dict) -> None:
     tabs = st.tabs([
-        "🎯 Predicción",
-        "📊 Comparativa",
-        "🔍 Feature Importance",
-        "📚 Pablo Original",
-        "ℹ️ Sobre los modelos",
+        "Predicción",
+        "Comparativa",
+        "Feature Importance",
+        "Pablo Original",
+        "ℹSobre los modelos",
     ])
 
     with tabs[0]:
@@ -59,7 +59,7 @@ def render_tabs(df_consumo: pd.DataFrame, config: dict) -> None:
 # TAB 1 — PREDICCIÓN
 # ============================================================================
 def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
-    st.subheader("🎯 Predicción")
+    st.subheader("Predicción")
 
     if not config["models"]:
         st.warning("Seleccioná al menos un modelo en el sidebar.")
@@ -86,7 +86,7 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
 
     if len(pred) == 0:
         st.warning(
-            "⚠️ No hay suficientes datos para este filtro. "
+            "No hay suficientes datos para este filtro. "
             "Probá con otro prestador o quitá el filtro."
         )
         return
@@ -101,16 +101,16 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
 
     # --- Métricas resumen ---
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📊 Registros", f"{len(pred):,}")
-    c2.metric("📅 Meses", len(ts))
+    c1.metric("Registros", f"{len(pred):,}")
+    c2.metric("Meses", len(ts))
 
     fmt = format_currency if config["metric"] in ("importe", "precio") else format_quantity
     total_real = ts["real"].sum()
     total_pred = ts["prediccion"].sum()
     error_pct = ((total_pred - total_real) / total_real * 100) if total_real > 0 else 0
 
-    c3.metric("💰 Real total", fmt(total_real))
-    c4.metric("🎯 Predicho total", fmt(total_pred), f"{error_pct:+.1f}%")
+    c3.metric("Real total", fmt(total_real))
+    c4.metric("Predicho total", fmt(total_pred), f"{error_pct:+.1f}%")
 
     # --- Gráfico ---
     fig = go.Figure()
@@ -138,7 +138,7 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
     # --- Tabla de detalle ---
-    with st.expander("📋 Ver detalle por mes"):
+    with st.expander("Ver detalle por mes"):
         display = ts.copy()
         display["Mes"] = display["mes_dt"].dt.strftime("%m-%Y")
         display["Real"] = display["real"].apply(fmt)
@@ -157,18 +157,18 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
 # TAB 2 — COMPARATIVA LADO A LADO
 # ============================================================================
 def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
-    st.subheader("📊 Comparativa de modelos")
+    st.subheader("Comparativa de modelos")
 
     if len(config["models"]) < 2:
         st.info(
-            "💡 Activá **ambos modelos** en el sidebar (LightGBM + Pablo corregido) "
+            "Activá **ambos modelos** en el sidebar (LightGBM + Pablo corregido) "
             "para ver la comparativa lado a lado."
         )
         return
 
     # Métricas del entrenamiento
     metricas_all = load_metricas()
-    st.write("### 🏆 Métricas de evaluación (calculadas en el entrenamiento)")
+    st.write("### Métricas de evaluación (calculadas en el entrenamiento)")
 
     rows = []
     for model_name in ["lightgbm", "pablo_corregido"]:
@@ -191,7 +191,7 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
     st.divider()
 
     # Predicciones lado a lado
-    st.write("### 📈 Predicciones aplicadas sobre tus datos")
+    st.write("### Predicciones aplicadas sobre tus datos")
 
     with st.spinner("Generando predicciones de ambos modelos..."):
         pred_lgb = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])
@@ -236,7 +236,7 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
 # TAB 3 — FEATURE IMPORTANCE
 # ============================================================================
 def _tab_feature_importance(config: dict) -> None:
-    st.subheader("🔍 Feature Importance (LightGBM)")
+    st.subheader("Feature Importance (LightGBM)")
     st.caption(
         "Qué variables pesan más para predecir la métrica elegida. "
         "Solo LightGBM lo soporta de forma interpretable."
@@ -259,7 +259,7 @@ def _tab_feature_importance(config: dict) -> None:
     fig.update_layout(height=500)
     st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("📖 ¿Qué significa cada feature?"):
+    with st.expander("¿Qué significa cada feature?"):
         st.markdown("""
         - **lag_1, lag_2, lag_3**: valor del mes pasado, hace 2 meses, hace 3 meses.
         - **rolling_mean_3, rolling_mean_6**: promedio de los últimos 3 o 6 meses (sin incluir el actual).
@@ -275,14 +275,14 @@ def _tab_feature_importance(config: dict) -> None:
 # TAB 4 — PABLO ORIGINAL (Opción P3: mostrar como museo)
 # ============================================================================
 def _tab_pablo_original() -> None:
-    st.subheader("📚 Enfoque original de Pablo")
+    st.subheader("Enfoque original de Pablo")
 
     st.info(
         "Esta sección muestra el **notebook original** del primer intento de Pablo, "
         "conservado como referencia histórica. **No se usa en producción** por el motivo explicado abajo."
     )
 
-    st.write("### 🧠 Arquitectura propuesta por Pablo")
+    st.write("### Arquitectura propuesta por Pablo")
     st.code("""
     # Arquitectura del modelo (Keras)
     model = Sequential([
@@ -303,7 +303,7 @@ def _tab_pablo_original() -> None:
     )
     """, language="python")
 
-    st.write("### ⚠️ Problema detectado: data leakage")
+    st.write("### Problema detectado: data leakage")
     st.markdown("""
     El notebook original usaba como features **todas las columnas de todos los meses disponibles**:
 
@@ -317,19 +317,19 @@ def _tab_pablo_original() -> None:
     **Consecuencia:** los resultados del notebook se ven muy buenos (R² alto, MAE bajo), pero **no son reproducibles en producción** — al momento de predecir el próximo mes, naturalmente no tenemos los meses siguientes.
     """)
 
-    st.write("### ✅ Cómo se corrigió para la app")
+    st.write("### Cómo se corrigió para la app")
     st.markdown("""
     En el Módulo 3 usamos la **misma arquitectura de Pablo** (`Dense(6,relu) → Dense(3,relu) → Dense(1)`)
     pero cambiamos las features:
 
-    - ❌ **Antes:** columnas de todos los meses (incluyendo futuros).
-    - ✅ **Ahora:** lags (valor hace 1, 2, 3 meses), medias móviles, estacionalidad.
+    - **Antes:** columnas de todos los meses (incluyendo futuros).
+    - **Ahora:** lags (valor hace 1, 2, 3 meses), medias móviles, estacionalidad.
 
     Esto permite que el modelo funcione para **predicciones reales** en escenarios de producción,
     respetando la arquitectura original que Pablo propuso.
     """)
 
-    st.write("### 📊 Comparativa ambos enfoques")
+    st.write("### Comparativa ambos enfoques")
     st.markdown("""
     | Aspecto | Pablo original | Pablo corregido (en esta app) |
     |---------|----------------|--------------------------------|
@@ -338,8 +338,8 @@ def _tab_pablo_original() -> None:
     | Batch size / Epochs | `20 / 200` | **Idénticos** |
     | Early Stopping | `patience=15` | **Idéntico** |
     | Features | Columnas de todos los meses (leakage) | Lags + rolling del pasado |
-    | Data leakage | ❌ Sí | ✅ No |
-    | Uso en producción | ❌ No válido | ✅ Sí |
+    | Data leakage | Sí | No |
+    | Uso en producción | No válido | Sí |
     """)
 
 
@@ -347,9 +347,9 @@ def _tab_pablo_original() -> None:
 # TAB 5 — SOBRE LOS MODELOS
 # ============================================================================
 def _tab_sobre_modelos() -> None:
-    st.subheader("ℹ️ Sobre los modelos")
+    st.subheader("ℹSobre los modelos")
 
-    st.write("### 🔵 LightGBM")
+    st.write("### LightGBM")
     st.markdown("""
     **Qué es:** algoritmo de gradient boosting basado en árboles de decisión.
     Es el estándar de la industria para problemas tabulares.
@@ -368,7 +368,7 @@ def _tab_sobre_modelos() -> None:
     ```
     """)
 
-    st.write("### 🧠 Red Neuronal (Pablo corregido)")
+    st.write("### Red Neuronal (Pablo corregido)")
     st.markdown("""
     **Qué es:** la arquitectura propuesta originalmente por Pablo, aplicada sin data leakage.
 
@@ -390,7 +390,7 @@ def _tab_sobre_modelos() -> None:
     - Permite explorar cómo escalan arquitecturas distintas con los mismos datos
     """)
 
-    st.write("### 🎯 Entrenamiento")
+    st.write("### Entrenamiento")
     metricas = load_metricas()
     if metricas:
         st.write("**Métricas finales de los 6 modelos entrenados:**")
@@ -408,6 +408,6 @@ def _tab_sobre_modelos() -> None:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.caption(
-        "💡 **Tip:** los modelos se re-entrenan corriendo `entrenar_modelos.ipynb` "
+        "**Tip:** los modelos se re-entrenan corriendo `entrenar_modelos.ipynb` "
         "en Google Colab con los datos más recientes y subiendo el ZIP resultante al repo."
     )

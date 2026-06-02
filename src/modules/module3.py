@@ -22,14 +22,14 @@ from ui.ml_tabs import render_tabs
 
 
 def render() -> None:
-    st.title(" Módulo 3 — Predicción ML")
+    st.title("Módulo 3 — Predicción ML")
 
     # --- Verificar modelos ---
     status = modelos_disponibles()
     faltantes = [k for k, v in status.items() if not v]
 
     if faltantes:
-        st.error("⚠️ **No se encontraron todos los modelos pre-entrenados**")
+        st.error("**No se encontraron todos los modelos pre-entrenados**")
         st.markdown(f"Faltan: `{', '.join(faltantes)}`")
         st.info("""
         **Cómo solucionarlo:**
@@ -46,12 +46,12 @@ def render() -> None:
     df_consumo, _ = load_consumo_and_valores()
     if df_consumo is None:
         st.info(
-            "⏳ **Esperando datos** — Subí `consumo.xlsx` desde el sidebar. "
+            "**Esperando datos** — Subí `consumo.xlsx` desde el sidebar. "
             "Si ya lo cargaste en el Módulo 1, debería aparecer automáticamente."
         )
         return
 
-    st.caption(f"📊 Dataset cargado: **{len(df_consumo):,}** registros")
+    st.caption(f"Dataset cargado: **{len(df_consumo):,}** registros")
 
     df_consumo, _ = normalize_dataframes(df_consumo, df_consumo.iloc[:0])
 

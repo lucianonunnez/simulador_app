@@ -25,7 +25,7 @@ def render_ml_controls(prestadores_disponibles: list = None) -> dict:
     """
     config = {}
 
-    with st.sidebar.expander("🎯 Configuración de Predicción", expanded=True):
+    with st.sidebar.expander("Configuración de Predicción", expanded=True):
 
         # --- Métrica ---
         metric_label = st.radio(
@@ -48,9 +48,9 @@ def render_ml_controls(prestadores_disponibles: list = None) -> dict:
 
         # --- Modelos a comparar ---
         st.caption("**Modelos a aplicar**")
-        usar_lgb = st.checkbox("🔵 LightGBM (recomendado)", value=True,
+        usar_lgb = st.checkbox("LightGBM (recomendado)", value=True,
                                 help="Gradient boosting. Más preciso para tabular.")
-        usar_pablo = st.checkbox("🧠 Red Neuronal (Pablo corregido)", value=True,
+        usar_pablo = st.checkbox("Red Neuronal (Pablo corregido)", value=True,
                                   help="Arquitectura original de Pablo, corregida sin data leakage.")
 
         config["models"] = []
@@ -60,10 +60,10 @@ def render_ml_controls(prestadores_disponibles: list = None) -> dict:
             config["models"].append("pablo_corregido")
 
         if not config["models"]:
-            st.warning("⚠️ Seleccioná al menos un modelo")
+            st.warning("Seleccioná al menos un modelo")
 
     # --- Filtro de prestador (opcional) ---
-    with st.sidebar.expander("🔍 Filtros (opcional)", expanded=False):
+    with st.sidebar.expander("Filtros (opcional)", expanded=False):
         if prestadores_disponibles:
             opts = ["(Todos)"] + [f"{pid} - {desc}" for pid, desc in prestadores_disponibles]
             choice = st.selectbox("Prestador específico", opts)

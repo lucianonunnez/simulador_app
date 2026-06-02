@@ -49,8 +49,8 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
             .drop_duplicates().sort_values("Prestador Desc")
         )
         prestadores["label"] = prestadores["Prestador ID"].astype(str) + " - " + prestadores["Prestador Desc"]
-        options  = ["🌍 TODOS"] + prestadores["label"].tolist()
-        selected = st.selectbox("🏥 Prestador", options, key="sim_prest")
+        options  = ["TODOS"] + prestadores["label"].tolist()
+        selected = st.selectbox("Prestador", options, key="sim_prest")
 
     with col_modo:
         mode_label = st.radio(
@@ -59,7 +59,7 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
             horizontal=True, key="sim_mode",
         )
 
-    config["prestador_id"] = None if selected == "🌍 TODOS" else int(selected.split(" - ")[0])
+    config["prestador_id"] = None if selected == "TODOS" else int(selected.split(" - ")[0])
     config["mode"] = {"Plano": "plano", "Por Nomenclador": "por_nomenclador",
                       "Por Prestación": "por_prestacion"}[mode_label]
 
@@ -68,14 +68,14 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
     if meses_dict:
         labels       = list(meses_dict.keys())
         seleccionados = st.multiselect(
-            "📅 Meses a analizar", options=labels, default=labels,
+            "Meses a analizar", options=labels, default=labels,
             key="sim_meses", help="Seleccioná uno, varios o todos los meses del dataset",
         )
         config["meses_raw"] = (
             [meses_dict[l] for l in seleccionados] if seleccionados else list(meses_dict.values())
         )
     else:
-        st.info("⚠️ El dataset no tiene columna 'Mes' — se usan todos los datos.")
+        st.info("El dataset no tiene columna 'Mes' — se usan todos los datos.")
         config["meses_raw"] = []
 
     # ── Scope para inputs ──
@@ -87,7 +87,7 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
     config["prestacion_pcts"]  = {}
 
     # ── Expander: Definir Aumentos ──
-    with st.expander("📊 Definir Aumentos", expanded=True):
+    with st.expander("Definir Aumentos", expanded=True):
 
         # ------------------------------------------------------------------ PLANO
         if config["mode"] == "plano":
