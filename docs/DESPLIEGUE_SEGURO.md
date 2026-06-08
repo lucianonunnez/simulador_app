@@ -14,8 +14,9 @@
 
 - [ ] BitLocker activo en el disco.
 - [ ] `secrets.toml` con `cookie_key` fuerte y passwords únicos por persona.
-- [ ] App bindeada a la IP de la LAN, no a `0.0.0.0` público.
-- [ ] Regla de firewall que permite el puerto **solo** desde la subred corporativa.
+- [ ] Levantar con `.\deploy\run_secure.ps1` (Streamlit en localhost + Caddy/TLS).
+- [ ] IP correcta en `deploy/Caddyfile` (la de tu notebook, `ipconfig`).
+- [ ] Regla de firewall que permite el **8443** solo desde la subred corporativa.
 - [ ] VPN conectada (si la red lo requiere).
 - [ ] Cerrar el server (Ctrl+C) al terminar la reunión.
 
@@ -25,7 +26,14 @@
 
 La app debe ser alcanzable **solo desde la LAN corporativa**, nunca desde Internet.
 
-- Servir bindeando a la IP de la red, no exponer al mundo:
+- **Recomendado (con TLS):** Streamlit escucha solo en `127.0.0.1` y se expone a
+  la LAN a través del reverse proxy Caddy en HTTPS (ver sección 8). Lo más simple
+  es usar el script:
+  ```powershell
+  .\deploy\run_secure.ps1
+  ```
+- Alternativa sin TLS (solo si no podés usar Caddy): bindear directo a la IP de la
+  red. Las contraseñas viajan en texto plano → evitalo si podés.
   ```bash
   streamlit run src/streamlit_app.py --server.address 10.11.45.103 --server.port 8501
   ```
@@ -34,11 +42,14 @@ La app debe ser alcanzable **solo desde la LAN corporativa**, nunca desde Intern
 
 ## 2. Firewall de Windows — regla acotada
 
-Permitir el puerto 8501 **solo** desde la subred corporativa, no desde "cualquiera":
+Con el reverse proxy, lo que se expone es el **8443 de Caddy** (HTTPS). El 8501 de
+Streamlit queda solo en localhost y **no** necesita regla de firewall.
+
+Permitir el puerto 8443 **solo** desde la subred corporativa, no desde "cualquiera":
 
 ```powershell
 New-NetFirewallRule -DisplayName "Simulador CM (LAN)" `
-  -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8501 `
+  -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8443 `
   -RemoteAddress 10.11.0.0/16 -Profile Domain,Private
 ```
 
@@ -46,6 +57,7 @@ New-NetFirewallRule -DisplayName "Simulador CM (LAN)" `
 - **Bloquear** el perfil `Public`. Nunca `-RemoteAddress Any`.
 - Borrar la regla cuando no se usa más:
   `Remove-NetFirewallRule -DisplayName "Simulador CM (LAN)"`.
+- (Si corrés sin TLS, cambiá `8443` por `8501`.)
 
 ## 3. Streamlit — config endurecida
 
@@ -90,20 +102,57 @@ enableXsrfProtection = true
 
 ## 7. Auditoría de acceso
 
-Para trazabilidad (valioso en datos médicos), registrar en un log local
-(`logs/auth_audit.log`, gitignored):
+✅ **Implementado** en `src/core/audit.py` + `src/auth.py`. Cada evento de login
+se registra como JSON Lines en `logs/auth_audit.log` (gitignored):
 
-- Login: timestamp, usuario, éxito/fallo, IP origen.
-- Acceso a datos: qué prestador consultó cada usuario.
+- `login_success` / `login_failed`: timestamp, usuario, IP origen, resultado.
 
-> Pendiente de implementar en `src/auth.py` (próximo paso del hardening).
+> La IP solo se captura bien si la app corre **detrás del reverse proxy** (sección
+> 8), que inyecta `X-Forwarded-For`. Sirviendo HTTP plano queda `"unknown"`.
+>
+> Pendiente (opcional): registrar también `data_access` (qué prestador consultó
+> cada usuario) — `audit.log_event("data_access", username, detail=prestador)`.
 
-## 8. Transporte (TLS)
+## 8. Transporte (TLS) con Caddy — ✅ configurado
 
 HTTP en la LAN manda las contraseñas **en texto plano** (sniffeables por alguien en
-la misma red). Lo correcto es ponerle **TLS con un reverse proxy local** (Caddy o
-nginx con certificado self-signed) delante de Streamlit. Para una demo puntual es
-opcional, pero es la mejora "bien hecha" antes de un uso recurrente.
+la misma red). La solución es un **reverse proxy con TLS** delante de Streamlit.
+Ya está configurado con **Caddy** (un solo binario, TLS automático).
+
+Arquitectura: `browser → https://IP:8443 (Caddy, TLS) → 127.0.0.1:8501 (Streamlit)`.
+Caddy además inyecta `X-Forwarded-For`, lo que habilita la IP real en la auditoría.
+
+### Pasos
+
+1. **Conseguir Caddy** (un solo `.exe`): descargar de
+   https://caddyserver.com/download y dejar `caddy.exe` en el PATH (o pasar la
+   ruta con `-Caddy` al script).
+2. **Ajustar la IP** en `deploy/Caddyfile` (línea `https://10.11.45.103:8443`) a
+   la IP real de tu notebook (`ipconfig`).
+3. **Levantar todo** con el script (Streamlit en localhost + Caddy en TLS):
+   ```powershell
+   .\deploy\run_secure.ps1
+   ```
+4. Los ejecutivos entran a `https://10.11.45.103:8443`.
+
+### Certificado y la advertencia del navegador
+
+Caddy usa su **CA interna** (`tls internal`): el certificado es válido pero no está
+firmado por una CA pública, así que el navegador muestra "no es seguro" la primera
+vez. Opciones:
+
+- **Demo puntual:** clic en "Avanzado → continuar". El tráfico va igual cifrado.
+- **Sin advertencia:** instalar la **CA raíz de Caddy** como confiable. En la
+  notebook que corre Caddy: `caddy trust`. En las máquinas de los ejecutivos, que
+  IT distribuya/instale ese root, o pedir a IT un certificado del CA corporativo.
+
+### Si algo falla
+
+- **No carga / WebSocket cortado:** confirmá que Streamlit quedó en `127.0.0.1:8501`
+  y que Caddy está corriendo (Caddy reenvía los WebSockets automáticamente).
+- **403 al subir un archivo:** es XSRF detrás del proxy. Como último recurso, en
+  `.streamlit/config.toml` poné `enableXsrfProtection = false` (el túnel TLS y el
+  login siguen protegiendo).
 
 ## 9. Operación
 

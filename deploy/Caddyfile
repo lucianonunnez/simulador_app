@@ -1,0 +1,32 @@
+# ============================================================================
+# Caddyfile — Reverse proxy con TLS para el Simulador CM (uso en LAN).
+# ============================================================================
+# Caddy termina TLS y reenvía a Streamlit, que escucha SOLO en localhost.
+# Además inyecta X-Forwarded-For automáticamente -> la auditoría de login
+# (src/core/audit.py) puede registrar la IP real del cliente.
+#
+# IMPORTANTE: reemplazar 10.11.45.103 por la IP real de tu notebook en la red
+# (averiguala con `ipconfig`). El puerto 8443 es el HTTPS de la app.
+# ============================================================================
+{
+	# CA interna local: emite certificados self-signed sin Internet (LAN).
+	local_certs
+	# No exponer la API de administración de Caddy.
+	admin off
+}
+
+https://10.11.45.103:8443 {
+	# Certificado emitido por la CA interna de Caddy (válido para esta IP).
+	tls internal
+
+	# Streamlit corre local; Caddy es el único proceso que lo alcanza.
+	reverse_proxy 127.0.0.1:8501
+
+	# Comprimir respuestas.
+	encode gzip
+
+	# Log de accesos (logs/ está gitignored).
+	log {
+		output file logs/caddy_access.log
+	}
+}
