@@ -176,8 +176,8 @@ def render() -> None:
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
     st.info("**Esperando datos** — Subí los archivos desde el sidebar.")
     st.markdown(f"""
-    - {"" if consumo_loaded else ""} **Archivo de Consumo** (`consumo.xlsx`)
-    - {"" if valores_loaded else ""} **Archivo de Valores** (`valores.xlsx`)
+    - {"[cargado]" if consumo_loaded else "[pendiente]"} **Archivo de Consumo** (`consumo.xlsx`)
+    - {"[cargado]" if valores_loaded else "[pendiente]"} **Archivo de Valores** (`valores.xlsx`)
     """)
 
 

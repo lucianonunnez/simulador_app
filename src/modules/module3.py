@@ -38,7 +38,7 @@ def render() -> None:
         2. Descargá el ZIP con los modelos
         3. Subí los archivos al repo en una carpeta `models/` en la raíz
 
-        Consultá a Claude el paso a paso si tenés dudas.
+        Ante dudas, contactá al área de Datos/IA.
         """)
         return
 
