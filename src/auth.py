@@ -10,12 +10,15 @@ Uso desde streamlit_app.py:
     render_logout()         # botón de cerrar sesión en sidebar
 
 Gestión de usuarios:
-    Editar .streamlit/secrets.toml en el panel de Hugging Face.
-    Ver README.md sección "Gestión de usuarios" para más detalles.
+    Editar .streamlit/secrets.toml (local, gitignored). Para generar el hash
+    bcrypt de un password y un cookie_key: python scripts/gen_credentials.py
+    Ver README.md y docs/DESPLIEGUE_SEGURO.md.
 """
 
 import streamlit as st
 import streamlit_authenticator as stauth
+
+from core.audit import log_event
 
 
 def _build_authenticator() -> stauth.Authenticate:
@@ -26,7 +29,7 @@ def _build_authenticator() -> stauth.Authenticate:
 
         cookie_key = "..."
         cookie_name = "simulador_cm_auth"
-        cookie_expiry_days = 7
+        cookie_expiry_days = 1
 
         [credentials.usernames.luciano]
         name = "Luciano Núñez"
@@ -57,7 +60,8 @@ def _build_authenticator() -> stauth.Authenticate:
         credentials=credentials,
         cookie_name=st.secrets.get("cookie_name", "simulador_cm_auth"),
         cookie_key=st.secrets["cookie_key"],
-        cookie_expiry_days=st.secrets.get("cookie_expiry_days", 7),
+        # Default corto (1 día) por seguridad; configurable en secrets.toml.
+        cookie_expiry_days=st.secrets.get("cookie_expiry_days", 1),
     )
 
 
@@ -83,6 +87,7 @@ def require_login() -> None:
         st.stop()
 
     status = st.session_state.get("authentication_status")
+    _audit_login(status)
 
     if status is False:
         st.error("Usuario o contraseña incorrectos")
@@ -91,6 +96,25 @@ def require_login() -> None:
         st.info("Ingresá tus credenciales para continuar")
         st.stop()
     # Si status es True, sigue la ejecución normal
+
+
+def _audit_login(status) -> None:
+    """
+    Registra eventos de login sin spamear por los reruns de Streamlit:
+    el éxito se loguea una vez por sesión y el fallo solo en la transición
+    a "incorrecto".
+    """
+    username = st.session_state.get("username")
+    prev = st.session_state.get("_audit_last_status", "init")
+
+    if status is True:
+        if not st.session_state.get("_audit_login_logged"):
+            log_event("login_success", username=username, success=True)
+            st.session_state["_audit_login_logged"] = True
+    elif status is False and prev is not False:
+        log_event("login_failed", username=username, success=False)
+
+    st.session_state["_audit_last_status"] = status
 
 
 def get_current_user() -> dict:
