@@ -29,9 +29,12 @@ from core.db import (
 )
 from core.excel_utils import (
     CONSUMO_MES_COL,
+    CONSUMO_NUMERIC_COLS,
     EXPECTED_CONSUMO_COLS,
     EXPECTED_VALORES_COLS,
     VALORES_MES_COL,
+    VALORES_NUMERIC_COLS,
+    clean_dataset,
     load_excel_smart,
     missing_columns,
 )
@@ -95,7 +98,9 @@ def _query_table(
 # ============================================================================
 # FALLBACK: UPLOAD MANUAL
 # ============================================================================
-def _load_from_upload(uploaded_file, expected_cols: set, label: str) -> Optional[pd.DataFrame]:
+def _load_from_upload(
+    uploaded_file, expected_cols: set, numeric_cols: set, label: str
+) -> Optional[pd.DataFrame]:
     """Carga un archivo subido manualmente desde la UI (fallback)."""
     if uploaded_file is None:
         return None
@@ -106,6 +111,7 @@ def _load_from_upload(uploaded_file, expected_cols: set, label: str) -> Optional
         miss = missing_columns(df, expected_cols)
         if miss:
             st.warning(f"{label}: faltan columnas {sorted(miss)}")
+        df = clean_dataset(df, numeric_cols)
         st.success(f"{label} cargado: {len(df):,} filas")
         return df
     except Exception as e:
@@ -161,7 +167,9 @@ def load_consumo_and_valores(
                 key="upload_consumo",
                 label_visibility="collapsed",
             )
-            df_consumo = _load_from_upload(up_c, EXPECTED_CONSUMO_COLS, "Consumo")
+            df_consumo = _load_from_upload(
+                up_c, EXPECTED_CONSUMO_COLS, CONSUMO_NUMERIC_COLS, "Consumo"
+            )
 
         if df_valores is None:
             st.divider()
@@ -175,6 +183,8 @@ def load_consumo_and_valores(
                 key="upload_valores",
                 label_visibility="collapsed",
             )
-            df_valores = _load_from_upload(up_v, EXPECTED_VALORES_COLS, "Valores")
+            df_valores = _load_from_upload(
+                up_v, EXPECTED_VALORES_COLS, VALORES_NUMERIC_COLS, "Valores"
+            )
 
     return df_consumo, df_valores

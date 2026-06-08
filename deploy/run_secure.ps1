@@ -1,10 +1,10 @@
 # ============================================================================
-# run_secure.ps1 — Levanta el Simulador CM de forma segura (Streamlit + Caddy/TLS).
+# run_secure.ps1 - Levanta el Simulador CM de forma segura (Streamlit + Caddy/TLS).
 # ============================================================================
 # - Streamlit escucha SOLO en 127.0.0.1:8501 (no accesible desde la red).
 # - Caddy termina TLS y expone la app en https://<IP>:8443 para la LAN.
 #
-# Uso (desde la raíz del repo, en PowerShell):
+# Uso (desde la raiz del repo, en PowerShell):
 #     .\deploy\run_secure.ps1
 #
 # Requisitos:
