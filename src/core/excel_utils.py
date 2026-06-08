@@ -39,6 +39,19 @@ EXPECTED_VALORES_COLS = {
 CONSUMO_MES_COL = "Mes"
 VALORES_MES_COL = "Mes Vigencia"
 
+# Columnas numéricas de cada dataset. Se coaccionan a número al cargar, lo que
+# neutraliza las filas de "Total"/"Subtotal" que MicroStrategy agrega al final
+# (texto en columnas numéricas) y que rompen el tipado de DuckDB.
+CONSUMO_NUMERIC_COLS = {
+    "Prestador ID", "Convenio ID", "Prestacion ID", "Cantidad CM", "Importe CM",
+}
+VALORES_NUMERIC_COLS = {
+    "Prestador ID", "Convenio ID", "Prestacion ID", "Valor Convenido a HOY",
+}
+
+# Columnas de identificador (se dejan como entero, sin decimales).
+_ID_COLS = {"Prestador ID", "Convenio ID", "Prestacion ID"}
+
 
 # ============================================================================
 # AUTODETECCIÓN DE ENCABEZADOS
@@ -81,3 +94,34 @@ def load_excel_smart(file_content: bytes, expected_cols: set) -> pd.DataFrame:
 def missing_columns(df: pd.DataFrame, expected_cols: set) -> set:
     """Devuelve las columnas esperadas que NO están en el df (vacío = OK)."""
     return set(expected_cols) - set(df.columns)
+
+
+def clean_dataset(
+    df: pd.DataFrame,
+    numeric_cols: set,
+    key_col: str = "Prestador ID",
+) -> pd.DataFrame:
+    """
+    Limpia el DataFrame antes de cargarlo a DuckDB.
+
+    - Coacciona las columnas numéricas a número (lo que no es número -> NaN).
+      Así una fila de "Total" con texto en una columna numérica no rompe el
+      tipado estricto de DuckDB.
+    - Descarta las filas sin clave válida (key_col NaN): elimina justamente esas
+      filas de Total/Subtotal de los exports de MicroStrategy.
+    - Deja los IDs como enteros nullable (sin el ".0" de los floats).
+    """
+    df = df.copy()
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if key_col in df.columns:
+        df = df[df[key_col].notna()].reset_index(drop=True)
+
+    for col in (numeric_cols & _ID_COLS):
+        if col in df.columns:
+            df[col] = df[col].astype("Int64")
+
+    return df

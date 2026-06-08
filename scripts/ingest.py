@@ -46,12 +46,14 @@ DATASETS = {
         "dir": RAW_DIR / "consumo",
         "table": db.CONSUMO_TABLE,
         "expected": xu.EXPECTED_CONSUMO_COLS,
+        "numeric": xu.CONSUMO_NUMERIC_COLS,
         "key": db.CONSUMO_KEY,
     },
     "valores": {
         "dir": RAW_DIR / "valores",
         "table": db.VALORES_TABLE,
         "expected": xu.EXPECTED_VALORES_COLS,
+        "numeric": xu.VALORES_NUMERIC_COLS,
         "key": db.VALORES_KEY,
     },
 }
@@ -147,6 +149,13 @@ def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool) -> int:
     if miss:
         print(f"  ! {path.name}: faltan columnas {sorted(miss)} — saltando")
         return 0
+
+    # Limpia filas de Total/Subtotal y tipa las columnas numéricas.
+    filas_antes = len(df)
+    df = xu.clean_dataset(df, ds["numeric"])
+    descartadas = filas_antes - len(df)
+    if descartadas:
+        print(f"    ({descartadas} fila(s) de total/sin clave descartadas)")
 
     con.execute("BEGIN")
     try:
