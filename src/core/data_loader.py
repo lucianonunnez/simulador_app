@@ -1,302 +1,180 @@
 """
-Carga de datos de consumo y valores.
+Carga de datos de consumo y valores desde DuckDB (local).
 
-Estrategia (en orden de prioridad):
-1. Carpeta local 'data/' si existe (modo oficina - datos precargados)
-2. URLs de OneDrive (si están en secrets.toml)
-3. Upload manual desde la UI (fallback universal)
+Antes esto leía los Excel ENTEROS a RAM con pandas en cada sesión. Ahora los
+datos viven en una base DuckDB local (data/simulador.duckdb), construida por
+scripts/ingest.py a partir de los Excel descargados manualmente de
+MicroStrategy. Las consultas piden solo lo necesario (filtros opcionales por
+prestador y mes), así que:
+  - La RAM usada es una fracción de la de antes.
+  - Nada sale de la máquina (datos médicos sensibles -> todo local).
 
-Usa caché de Streamlit para no recargar en cada interacción.
+Si la base todavía no existe (checkout nuevo, sin datos ingeridos), cae a un
+uploader manual en el sidebar para no dejar la app inutilizable.
 """
 
 from __future__ import annotations
 
-import base64
-import time
-from io import BytesIO
-from pathlib import Path
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 import pandas as pd
-import requests
 import streamlit as st
 
-
-# ============================================================================
-# COLUMNAS ESPERADAS
-# ============================================================================
-EXPECTED_CONSUMO_COLS = {
-    "Prestador ID", "Prestador Desc", "Convenio ID", "Convenio Desc",
-    "Mes", "Tipo Categoria", "Megacuenta", "Gama", "Cartilla",
-    "Tipo Clase CM", "Nomenclador", "Prestacion Desc", "Prestacion ID",
-    "Cantidad CM", "Importe CM",
-}
-
-EXPECTED_VALORES_COLS = {
-    "Prestador ID", "Prestador Desc", "Convenio Desc", "Convenio ID",
-    "Prestacion Desc", "Prestacion ID", "Mes Vigencia", "Valor Convenido a HOY",
-}
-
-# Carpeta local donde buscar los archivos precargados (modo oficina)
-LOCAL_DATA_DIR = Path("data")
-LOCAL_CONSUMO_FILE = LOCAL_DATA_DIR / "consumo.xlsx"
-LOCAL_VALORES_FILE = LOCAL_DATA_DIR / "valores.xlsx"
+from core.db import (
+    CONSUMO_TABLE,
+    DB_PATH,
+    VALORES_TABLE,
+    get_connection,
+    table_exists,
+)
+from core.excel_utils import (
+    CONSUMO_MES_COL,
+    EXPECTED_CONSUMO_COLS,
+    EXPECTED_VALORES_COLS,
+    VALORES_MES_COL,
+    load_excel_smart,
+    missing_columns,
+)
 
 
-# ============================================================================
-# AUTODETECCIÓN DE ENCABEZADOS
-# ============================================================================
-def _detect_header_row(file_content: bytes, expected_cols: set, max_rows: int = 10) -> int:
-    """
-    Detecta en qué fila está el encabezado real.
-
-    Reemplaza el bug original (skiprows=3 hardcoded), que rompía cuando
-    el Excel no traía 3 filas de título de Power BI.
-    """
-    buf = BytesIO(file_content)
-    preview = pd.read_excel(buf, header=None, nrows=max_rows, engine="openpyxl")
-
-    best_row = 0
-    best_matches = 0
-
-    for row_idx in range(len(preview)):
-        row_values = set(preview.iloc[row_idx].astype(str).str.strip())
-        matches = len(row_values & expected_cols)
-        if matches > best_matches:
-            best_matches = matches
-            best_row = row_idx
-
-    if best_matches < 3:
-        return 0
-
-    return best_row
-
-
-def _load_excel_smart(file_content: bytes, expected_cols: set) -> pd.DataFrame:
-    """Carga un Excel autodetectando la fila de encabezado."""
-    skiprows = _detect_header_row(file_content, expected_cols)
-    buf = BytesIO(file_content)
-    df = pd.read_excel(buf, skiprows=skiprows, engine="openpyxl")
-    df.columns = df.columns.astype(str).str.strip()
-    return df
+def _as_tuple(x: Optional[Iterable]) -> Optional[tuple]:
+    """st.cache_data necesita argumentos hasheables -> listas a tuplas."""
+    return None if x is None else tuple(x)
 
 
 # ============================================================================
-# LECTURA DESDE CARPETA LOCAL (modo oficina)
-# ============================================================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def _load_from_local_file(path_str: str, _expected_cols: frozenset) -> Optional[pd.DataFrame]:
-    """
-    Carga un archivo local (desde carpeta data/).
-    Resultado cacheado 1 hora para no re-leer en cada interacción.
-
-    Recibe path_str (no Path) porque st.cache_data necesita argumentos hasheables.
-    """
-    path = Path(path_str)
-    if not path.exists():
-        return None
-    try:
-        with open(path, "rb") as f:
-            content = f.read()
-        return _load_excel_smart(content, set(_expected_cols))
-    except Exception as e:
-        st.error(f"Error leyendo archivo local {path.name}: {e}")
-        return None
-
-
-def _check_local_files() -> Tuple[bool, bool]:
-    """Chequea si existen los archivos locales precargados."""
-    return LOCAL_CONSUMO_FILE.exists(), LOCAL_VALORES_FILE.exists()
-
-
-# ============================================================================
-# DESCARGA DESDE ONEDRIVE
-# ============================================================================
-def _onedrive_to_direct_url(sharing_url: str) -> str:
-    """Convierte un link de compartir de OneDrive a URL de descarga directa."""
-    if not sharing_url or not isinstance(sharing_url, str):
-        return ""
-
-    sharing_url = sharing_url.strip()
-
-    if "1drv.ms" in sharing_url:
-        try:
-            parts = sharing_url.split("?")[0].split("/")
-            if len(parts) >= 2:
-                res_id = "/".join(parts[-2:])
-                if res_id:
-                    encoded = base64.urlsafe_b64encode(res_id.encode()).decode().rstrip("=")
-                    return f"https://api.onedrive.com/v1.0/shares/u!{encoded}/root/content"
-        except Exception:
-            pass
-
-    if "/personal/" in sharing_url or "/business/" in sharing_url:
-        if "redir?resid=" in sharing_url:
-            return sharing_url.replace("redir?resid=", "download?resid=")
-        if "?" not in sharing_url:
-            return sharing_url + "?download=1"
-
-    return sharing_url
-
-
-def _download_with_retries(url: str, retries: int = 3, timeout: int = 30) -> Optional[bytes]:
-    """Descarga con reintentos y backoff exponencial."""
-    if not url:
-        return None
-
-    for attempt in range(retries):
-        try:
-            resp = requests.get(url, timeout=timeout, allow_redirects=True)
-            resp.raise_for_status()
-            return resp.content
-        except requests.exceptions.RequestException:
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-                continue
-            return None
-
-    return None
-
-
-# ============================================================================
-# API PÚBLICA
+# CONSULTA A DUCKDB
 # ============================================================================
 @st.cache_data(ttl=600, show_spinner=False)
-def _load_from_onedrive_cached(url: str, _expected_cols: frozenset) -> Optional[pd.DataFrame]:
-    """Descarga y parsea un Excel desde OneDrive. Resultado cacheado 10 min."""
-    direct_url = _onedrive_to_direct_url(url)
-    content = _download_with_retries(direct_url)
-    if content is None:
+def _query_table(
+    table: str,
+    mes_col: str,
+    prestador_ids: Optional[tuple],
+    meses: Optional[tuple],
+) -> Optional[pd.DataFrame]:
+    """
+    Consulta una tabla de DuckDB con filtros opcionales empujados al SQL.
+
+    Devuelve None si la base/tabla no existe o no hay filas (para que la capa
+    de arriba muestre el fallback de upload manual). Cacheado 10 min.
+    """
+    if not DB_PATH.exists():
         return None
-    return _load_excel_smart(content, set(_expected_cols))
+
+    con = get_connection(read_only=True)
+    try:
+        if not table_exists(con, table):
+            return None
+
+        sql = f'SELECT * FROM "{table}"'
+        clauses: list[str] = []
+        params: list = []
+
+        if prestador_ids:
+            placeholders = ",".join(["?"] * len(prestador_ids))
+            clauses.append(f'"Prestador ID" IN ({placeholders})')
+            params.extend(prestador_ids)
+
+        if meses:
+            placeholders = ",".join(["?"] * len(meses))
+            clauses.append(f'"{mes_col}" IN ({placeholders})')
+            params.extend(meses)
+
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+
+        df = con.execute(sql, params).fetch_df()
+        return df if len(df) else None
+    except Exception as e:
+        st.error(f"Error consultando '{table}' en DuckDB: {e}")
+        return None
+    finally:
+        con.close()
 
 
+# ============================================================================
+# FALLBACK: UPLOAD MANUAL
+# ============================================================================
 def _load_from_upload(uploaded_file, expected_cols: set, label: str) -> Optional[pd.DataFrame]:
-    """Carga un archivo subido manualmente."""
+    """Carga un archivo subido manualmente desde la UI (fallback)."""
     if uploaded_file is None:
         return None
-
     try:
         with st.spinner(f"Leyendo {label}..."):
             content = uploaded_file.read()
-            df = _load_excel_smart(content, expected_cols)
+            df = load_excel_smart(content, expected_cols)
+        miss = missing_columns(df, expected_cols)
+        if miss:
+            st.warning(f"{label}: faltan columnas {sorted(miss)}")
+        st.success(f"{label} cargado: {len(df):,} filas")
         return df
     except Exception as e:
         st.error(f"Error leyendo {label}: {e}")
         return None
 
 
-def load_consumo_and_valores() -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+# ============================================================================
+# API PÚBLICA
+# ============================================================================
+def load_consumo_and_valores(
+    prestador_ids: Optional[Iterable] = None,
+    meses: Optional[Iterable] = None,
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
-    Carga los dos datasets en este orden de prioridad:
+    Carga consumo y valores desde DuckDB (con filtros opcionales).
 
-    1. Carpeta local 'data/' (modo oficina con archivos precargados).
-    2. URLs de OneDrive (si están configuradas en secrets.toml).
-    3. Upload manual desde la UI (fallback universal).
+    Args:
+        prestador_ids: si se pasa, filtra por esos "Prestador ID" (más liviano).
+        meses: si se pasa, filtra por esos meses ("Mes" / "Mes Vigencia").
 
     Returns:
         (df_consumo, df_valores). Cada uno puede ser None si no se cargó.
+
+    Nota: sin argumentos trae las tablas completas (comportamiento histórico,
+    apto para volúmenes de demo). Para datasets grandes conviene pasar
+    prestador_ids/meses y dejar que DuckDB filtre en disco.
     """
-    df_consumo = None
-    df_valores = None
+    pid = _as_tuple(prestador_ids)
+    mes = _as_tuple(meses)
 
-    # ---- 1. Intento: carpeta local ----
-    has_local_consumo, has_local_valores = _check_local_files()
+    df_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes)
+    df_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes)
 
-    if has_local_consumo or has_local_valores:
-        with st.sidebar.expander("Carga de datos", expanded=True):
-            if has_local_consumo:
-                with st.spinner("Leyendo Consumo desde carpeta local..."):
-                    df_consumo = _load_from_local_file(
-                        str(LOCAL_CONSUMO_FILE),
-                        frozenset(EXPECTED_CONSUMO_COLS),
-                    )
-                if df_consumo is not None:
-                    st.success(f"Consumo (local): {len(df_consumo):,} filas")
+    need_fallback = df_consumo is None or df_valores is None
 
-            if has_local_valores:
-                with st.spinner("Leyendo Valores desde carpeta local..."):
-                    df_valores = _load_from_local_file(
-                        str(LOCAL_VALORES_FILE),
-                        frozenset(EXPECTED_VALORES_COLS),
-                    )
-                if df_valores is not None:
-                    st.success(f"Valores (local): {len(df_valores):,} filas")
+    with st.sidebar.expander("Carga de datos", expanded=need_fallback):
+        if df_consumo is not None:
+            st.success(f"Consumo: {len(df_consumo):,} filas")
+        if df_valores is not None:
+            st.success(f"Valores: {len(df_valores):,} filas")
 
-        # Si ambos cargaron localmente, listo
-        if df_consumo is not None and df_valores is not None:
-            return df_consumo, df_valores
-
-    # ---- 2. Intento: OneDrive ----
-    onedrive_consumo = _get_secret("onedrive_consumo_url")
-    onedrive_valores = _get_secret("onedrive_valores_url")
-
-    with st.sidebar.expander("Carga de datos", expanded=True):
-        # ---- OneDrive: Consumo ----
-        if df_consumo is None and onedrive_consumo:
-            with st.spinner("Descargando Consumo desde OneDrive..."):
-                df_consumo = _load_from_onedrive_cached(
-                    onedrive_consumo,
-                    frozenset(EXPECTED_CONSUMO_COLS),
-                )
-            if df_consumo is not None:
-                st.success(f"Consumo (OneDrive): {len(df_consumo):,} filas")
-            else:
-                st.warning(
-                    "No se pudo descargar Consumo desde OneDrive. "
-                    "Subilo manualmente abajo."
-                )
-
-        # ---- OneDrive: Valores ----
-        if df_valores is None and onedrive_valores:
-            with st.spinner("Descargando Valores desde OneDrive..."):
-                df_valores = _load_from_onedrive_cached(
-                    onedrive_valores,
-                    frozenset(EXPECTED_VALORES_COLS),
-                )
-            if df_valores is not None:
-                st.success(f"Valores (OneDrive): {len(df_valores):,} filas")
-            else:
-                st.warning(
-                    "No se pudo descargar Valores desde OneDrive. "
-                    "Subilo manualmente abajo."
-                )
-
-        # ---- 3. Fallback: upload manual ----
+        # ---- Fallback: upload manual si falta algún dataset ----
         if df_consumo is None:
             st.divider()
-            st.caption("Archivo de Consumo")
+            st.caption(
+                "Consumo no está en la base. Subilo manualmente o corré "
+                "`python scripts/ingest.py`."
+            )
             up_c = st.file_uploader(
                 "Subir Consumo (xlsx)",
                 type=["xlsx"],
                 key="upload_consumo",
                 label_visibility="collapsed",
             )
-            if up_c is not None:
-                df_consumo = _load_from_upload(up_c, EXPECTED_CONSUMO_COLS, "Consumo")
-                if df_consumo is not None:
-                    st.success(f"Consumo cargado: {len(df_consumo):,} filas")
+            df_consumo = _load_from_upload(up_c, EXPECTED_CONSUMO_COLS, "Consumo")
 
         if df_valores is None:
             st.divider()
-            st.caption("Archivo de Valores")
+            st.caption(
+                "Valores no está en la base. Subilo manualmente o corré "
+                "`python scripts/ingest.py`."
+            )
             up_v = st.file_uploader(
                 "Subir Valores (xlsx)",
                 type=["xlsx"],
                 key="upload_valores",
                 label_visibility="collapsed",
             )
-            if up_v is not None:
-                df_valores = _load_from_upload(up_v, EXPECTED_VALORES_COLS, "Valores")
-                if df_valores is not None:
-                    st.success(f"Valores cargado: {len(df_valores):,} filas")
+            df_valores = _load_from_upload(up_v, EXPECTED_VALORES_COLS, "Valores")
 
     return df_consumo, df_valores
-
-
-def _get_secret(key: str) -> str:
-    """Lee un secret sin romper si no existe."""
-    try:
-        return st.secrets.get(key, "")
-    except Exception:
-        return ""

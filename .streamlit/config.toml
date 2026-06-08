@@ -11,19 +11,18 @@ textColor = "#212529"
 font = "sans serif"
 
 [server]
-# Max upload size (MB). HF respeta este valor.
+# Max upload size (MB).
 maxUploadSize = 200
 
-# CORS: HF lo maneja a nivel proxy, lo dejamos off
-enableCORS = false
+# DESPLIEGUE LOCAL EN LA LAN (configuración actual, ver docs/DESPLIEGUE_SEGURO.md).
+# Al servir por IP en la red corporativa, estas protecciones DEBEN estar activas:
+# son la defensa contra CSRF y contra peticiones cross-origin maliciosas.
+enableCORS = true
+enableXsrfProtection = true
 
-# XSRF: DEBE estar en false en HF Spaces + Docker.
-# En este entorno el proxy de HF no reenvía bien los tokens XSRF,
-# provocando 403 Forbidden en st.file_uploader.
-# Ref: https://discuss.huggingface.co/t/axioserror-request-failed-with-status-code-403-when-uploading-a-file-with-streamlit/166694
-# El Space es privado y está protegido por login, así que desactivar
-# XSRF no aumenta materialmente el riesgo.
-enableXsrfProtection = false
+# NOTA: si en algún momento se despliega en Hugging Face Spaces (proxy + Docker),
+# ambas deben ir en false porque el proxy de HF no reenvía bien los tokens XSRF
+# (provoca 403 en st.file_uploader). Pero para correr local en la LAN, van en true.
 
 [browser]
 gatherUsageStats = false

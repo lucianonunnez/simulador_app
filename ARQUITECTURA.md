@@ -6,6 +6,12 @@
 > **Contexto al momento de escribir esto:** objetivo = producto serio/productivo,
 > pero hoy se ejecuta local en la compu, en fase de pruebas. Tema compliance de
 > datos médicos en cloud → pendiente de definir (lo salteamos por ahora).
+>
+> **🔒 Decisión tomada (Fase 1):** la capa de datos es **DuckDB local**, NO
+> Supabase. Motivo: los datos médicos/de prestadores no pueden salir de la
+> máquina ("todo local") y no hay acceso a infra cloud aprobada todavía.
+> Supabase/PostgreSQL queda como **fase futura de nube**, cuando haya acceso a
+> AWS + aprobación de compliance. Ver `memory/simulador-cm-datos-decision.md`.
 
 ---
 
@@ -16,17 +22,18 @@ Resuelven capas distintas. No hay que elegir entre uno y otro.
 | Pieza | Rol | Capa |
 |---|---|---|
 | **Streamlit** | UI + lógica + servidor, todo junto en Python | Frontend **y** backend |
-| **Excel + OneDrive** | Dónde viven los datos hoy | Datos |
+| **DuckDB local** | Dónde viven los datos (Excel bajado a mano → DuckDB) | Datos |
 | **models/** | Modelos ML pre-entrenados (LightGBM + red neuronal) | ML |
 | **streamlit-authenticator + secrets.toml** | Login (usuarios con hash bcrypt hardcodeado) | Auth |
 | **Docker** | Empaqueta la app para desplegarla | Deploy/infra |
 
-- **Supabase** reemplazaría a **Excel/OneDrive** (la capa de datos), NO a Streamlit.
+- **DuckDB** (hoy) y **Supabase** (futuro cloud) reemplazan la capa de datos, NO a Streamlit.
 - **Docker** no es alternativa a nada: es *cómo* se despliega. Se queda igual.
 - **Streamlit** eventualmente se reemplaza por un frontend real, pero recién en la última fase.
 
-Hoy los datos se leen de **Excel** (local / OneDrive / upload manual, ver
-`src/core/data_loader.py`) y se cargan **enteros a memoria con pandas** en cada sesión.
+Los datos se descargan a mano de MicroStrategy, se cargan a una **base DuckDB
+local** con `scripts/ingest.py`, y `src/core/data_loader.py` los **consulta con
+filtros** (no carga todo a RAM como hacía antes con Excel + pandas).
 
 ---
 
@@ -42,9 +49,11 @@ src/
 └── streamlit_app.py → entry point
 ```
 
-**Detalle a corregir:** los módulos importan de `ui.ml_controls` y `ui.ml_tabs`,
-así que **`core/ml_controls.py` y `core/ml_tabs.py` son código muerto** (copias
-viejas que no se usan) → hay que borrarlos.
+**Hecho:** se borraron `core/ml_controls.py` y `core/ml_tabs.py` (eran código
+muerto: los módulos importan de `ui.ml_controls` / `ui.ml_tabs`, no de `core`).
+También se extrajo el parseo de Excel a `core/excel_utils.py` (Python puro, sin
+Streamlit) para reutilizarlo desde el script de ingesta — primer paso del
+desacople de `core/`.
 
 Esa separación es la que facilita evolucionar: **`core/` ya es casi un backend**,
 solo está acoplado a Streamlit por dentro (usa `st.cache_data`, `st.error`, etc.).
@@ -94,11 +103,21 @@ Como hoy se prueba en la compu, **no** tiene sentido el split completo todavía.
   Clave: una vez que `core/` es Python puro, se puede envolver en FastAPI
   *o* seguir usándolo desde Streamlit sin tocar nada.
 
-### 🟡 Fase 1 — Datos a Supabase (alto impacto)
-- Crear proyecto Supabase (free tier para pruebas), tablas `consumo` y `valores`.
-- Script de ingesta: Excel → Postgres (una vez, o cuando llega un Excel nuevo).
-- Reescribir **solo** `data_loader.py` para consultar Supabase en vez de leer Excel.
+### 🟡 Fase 1 — Datos a DuckDB local (alto impacto) ✅ en curso
+- Base **DuckDB** embebida (`data/simulador.duckdb`), tablas `consumo` y `valores`.
+- Script de ingesta idempotente: Excel (bajado a mano) → DuckDB, con upsert por
+  `(Prestador ID, Mes)` (`scripts/ingest.py`).
+- Reescrito **solo** `data_loader.py` para consultar DuckDB en vez de leer Excel.
 - Todo lo demás (módulos, ML, UI) **no se toca**. Streamlit sigue igual.
+- **Por qué DuckDB y no Supabase ahora:** datos médicos = todo local, sin nube.
+  DuckDB da las mismas ventajas (SQL con filtros, no cargar todo a RAM) sin sacar
+  los datos de la máquina. La nube (Supabase/Postgres) queda para cuando haya
+  infra aprobada (ver Fase futura).
+
+### 🟣 Fase futura — Nube (cuando haya AWS + compliance aprobado)
+- Migrar de DuckDB a **PostgreSQL** (Supabase self-hosted o AWS).
+- Esquema en estrella con `dim_prestador` (coordinación) para la comparativa por
+  coordinación. El SQL del `data_loader` cambia poco (mismo modelo relacional).
 
 ### 🟠 Fase 2 — Backend real
 - Envolver `core/` en FastAPI. Streamlit pasa a consumir la API.
@@ -112,15 +131,16 @@ Como hoy se prueba en la compu, **no** tiene sentido el split completo todavía.
 
 ## 5. Recomendación concreta
 
-Arrancar por **Fase 0 + Fase 1**: es lo que más valor da con menos riesgo, y deja
-la base lista para todo lo demás. Streamlit se queda de "frontend provisorio"
-mientras se valida el modelo de datos en Supabase.
+Se arrancó por **Fase 0 + Fase 1** (DuckDB local): es lo que más valor da con
+menos riesgo, y deja la base lista para todo lo demás. Streamlit se queda de
+"frontend provisorio" mientras se valida el modelo de datos.
 
-**Próximos pasos posibles:**
-- **(A)** Fase 0 — limpiar código muerto y desacoplar `core/` de Streamlit.
-- **(B)** Fase 1 — esquema de Supabase + script de ingesta + nuevo `data_loader`
-  (requiere crear proyecto Supabase y definir cloud vs self-hosted).
-- **(C)** Las dos, en orden.
+**Estado / próximos pasos:**
+- **✅ Fase 0** — borrado código muerto; parseo de Excel extraído a `excel_utils.py`.
+- **✅ Fase 1** — base DuckDB + `scripts/ingest.py` + `data_loader` que consulta SQL.
+- **⏭️ Hardening de seguridad** — ver `docs/DESPLIEGUE_SEGURO.md` (binding LAN,
+  firewall, auth, BitLocker, auditoría de login).
+- **⏭️ Fase futura** — migrar a PostgreSQL cuando haya nube aprobada.
 
 ---
 

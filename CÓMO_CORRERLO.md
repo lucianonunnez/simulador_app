@@ -29,8 +29,16 @@ streamlit run src/streamlit_app.py
 ```
 
 Se abre solo en el navegador en `http://localhost:8501`.
-La app **detecta automáticamente** los archivos de la carpeta `data/`, así que
-no hay que subir nada: arranca con los datos ya cargados.
+
+La app consulta la base local **`data/simulador.duckdb`**. Si todavía no la
+construiste, dejá los Excel en `data/raw/consumo/` y `data/raw/valores/` y corré
+la ingesta una vez:
+
+```bash
+python scripts/ingest.py
+```
+
+(Si no hay base, la app igual te deja subir los Excel a mano desde el panel lateral.)
 
 ---
 
@@ -46,9 +54,9 @@ docker run -p 8501:8501 simulador-cm
 Luego abrir `http://localhost:8501`.
 
 > ⚠️ Nota: la imagen Docker **no** incluye la carpeta `data/` (por diseño, para no
-> meter datos sensibles en la imagen). Con Docker, los datos se cargan desde OneDrive
-> o subiéndolos a mano desde el panel lateral. Para una demo rápida con datos ya
-> cargados, usá la **Opción A**.
+> meter datos sensibles en la imagen). Con Docker, montá un volumen con la base
+> DuckDB ya construida, o subí los Excel a mano desde el panel lateral. Para una
+> demo rápida, usá la **Opción A**.
 
 ---
 
@@ -64,7 +72,7 @@ La app pide usuario y contraseña. Los usuarios están definidos en
 ```
 ├── src/                 Código de la app (Streamlit)
 ├── models/              Modelos ML pre-entrenados (LightGBM + red neuronal)
-├── data/                Datos de ejemplo (consumo.xlsx, valores.xlsx)
+├── data/                Base DuckDB local + Excel crudos en data/raw/ (NO versionado)
 ├── .streamlit/          Configuración visual + credenciales (secrets.toml)
 ├── Dockerfile           Para correr en contenedor / desplegar
 ├── requirements.txt     Dependencias de Python
