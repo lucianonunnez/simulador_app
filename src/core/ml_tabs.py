@@ -408,6 +408,6 @@ def _tab_sobre_modelos() -> None:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.caption(
-        "**Tip:** los modelos se re-entrenan periódicamente con los datos "
-        "más recientes para mantener la precisión de las predicciones."
+        "**Tip:** los modelos se re-entrenan corriendo `entrenar_modelos.ipynb` "
+        "en Google Colab con los datos más recientes y subiendo el ZIP resultante al repo."
     )

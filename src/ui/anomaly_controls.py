@@ -153,9 +153,9 @@ def render_anomaly_controls() -> dict:
     # --- Nota sobre ML ---
     with st.sidebar.expander("Detección con ML", expanded=False):
         st.info(
-            "La detección basada en modelo LightGBM se agrega en el **Hito 5**, "
-            "cuando tengamos el modelo entrenado. Por ahora usamos solo métodos "
-            "estadísticos, que son rápidos e interpretables."
+            "La detección basada en modelo LightGBM se incorporará en una "
+            "próxima versión. Por ahora usamos solo métodos estadísticos, "
+            "que son rápidos e interpretables."
         )
 
     return config

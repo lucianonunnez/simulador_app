@@ -22,10 +22,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from core.logging_config import audit, get_logger
-
-log = get_logger(__name__)
-
 # Imports lazy para que la app no falle si TF no está instalado
 _tf = None
 _lgb = None
@@ -51,9 +47,7 @@ def load_lightgbm(metric: Literal["importe", "precio", "cantidad"]):
     path = MODELS_DIR / f"lightgbm_{metric}.txt"
     if not path.exists():
         raise FileNotFoundError(f"No se encontró {path}. ¿Subiste los modelos al repo?")
-    booster = lgb.Booster(model_file=str(path))
-    audit("model_loaded", model="lightgbm", metric=metric)
-    return booster
+    return lgb.Booster(model_file=str(path))
 
 
 @st.cache_resource(show_spinner="Cargando red neuronal...")
