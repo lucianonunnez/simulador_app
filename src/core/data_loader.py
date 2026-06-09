@@ -188,3 +188,31 @@ def load_consumo_and_valores(
             )
 
     return df_consumo, df_valores
+
+
+# ============================================================================
+# TRANSFORMACIONES CACHEADAS
+# ============================================================================
+# El merge y la normalización de tipos son pesados (to_numeric sobre todo el
+# dataset + pd.merge). Antes corrían en CADA rerun de Streamlit -> el indicador
+# de "Procesando datos..." reaparecía a cada interacción (el "parpadeo"). Acá
+# se cachean: solo se recalculan cuando cambian los datos de entrada.
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_merged_dataset(
+    df_consumo: pd.DataFrame, df_valores: pd.DataFrame
+) -> pd.DataFrame:
+    """Normaliza + une consumo y valores (cacheado). Usado por el Módulo 1."""
+    from core.simulator import merge_datasets, normalize_dataframes
+
+    c, v = normalize_dataframes(df_consumo, df_valores)
+    return merge_datasets(c, v)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_normalized_consumo(df_consumo: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza tipos del dataset de consumo (cacheado). Usado por Mód. 2 y 3."""
+    from core.simulator import normalize_dataframes
+
+    c, _ = normalize_dataframes(df_consumo, df_consumo.iloc[:0])
+    return c

@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.data_loader import load_consumo_and_valores
+from core.data_loader import get_normalized_consumo, load_consumo_and_valores
 from core.ml_predictor import modelos_disponibles
-from core.simulator import normalize_dataframes
 from ui.ml_controls import render_ml_controls
 from ui.ml_tabs import render_tabs
 
@@ -53,7 +52,7 @@ def render() -> None:
 
     st.caption(f"Dataset cargado: **{len(df_consumo):,}** registros")
 
-    df_consumo, _ = normalize_dataframes(df_consumo, df_consumo.iloc[:0])
+    df_consumo = get_normalized_consumo(df_consumo)
 
     # --- Prestadores disponibles (para el filtro del sidebar) ---
     prestadores = (
