@@ -15,6 +15,32 @@ from ui.simulator_tabs import render_tabs
 
 
 # ============================================================================
+# CÁLCULO CACHEADO
+# ============================================================================
+@st.cache_data(show_spinner=False, max_entries=50)
+def _apply_simulation_cached(
+    df_scope, mode, flat_pct, nomenclador_pcts, prestacion_pcts
+):
+    """
+    Wrapper cacheado de apply_simulation.
+
+    apply_simulation copia el DataFrame y recalcula Consumo Ideal/Simulado en
+    cada rerun, también al cambiar de tab (Streamlit ejecuta el cuerpo de todos
+    los tabs). Cacheado por (datos + parámetros del aumento), solo se recalcula
+    cuando el usuario cambia algún %, prestador o mes; los cambios de tab y
+    otras interacciones reusan el resultado.
+    """
+    return apply_simulation(
+        df_merged=df_scope,
+        months=1,
+        mode=mode,
+        flat_pct=flat_pct,
+        nomenclador_pcts=nomenclador_pcts,
+        prestacion_pcts=prestacion_pcts,
+    )
+
+
+# ============================================================================
 # HELPERS DE UI
 # ============================================================================
 
@@ -119,13 +145,12 @@ def render() -> None:
         st.warning("Sin datos para los meses seleccionados.")
         return
 
-    df_simulated = apply_simulation(
-        df_merged=df_scope,
-        months=1,
-        mode=config["mode"],
-        flat_pct=config["flat_pct"],
-        nomenclador_pcts=config["nomenclador_pcts"],
-        prestacion_pcts=config["prestacion_pcts"],
+    df_simulated = _apply_simulation_cached(
+        df_scope,
+        config["mode"],
+        config["flat_pct"],
+        config["nomenclador_pcts"],
+        config["prestacion_pcts"],
     )
 
     n_meses      = len(meses_raw) if meses_raw else "todos"
