@@ -22,6 +22,43 @@ from core.anomaly import (
 from ui.formatters import format_currency, format_currency_full, format_quantity
 
 
+# ============================================================================
+# WRAPPERS CACHEADOS
+# ============================================================================
+# Las funciones de core.anomaly son puras pero caras (groupby + rolling +
+# apply). Streamlit ejecuta el cuerpo de TODOS los tabs en cada rerun, así que
+# sin caché se recalculaban a cada interacción (incluso al solo cambiar de tab).
+# Separar build_time_series (no depende del umbral) de la detección permite que
+# mover un slider de umbral/ventana NO reconstruya la serie temporal.
+
+@st.cache_data(show_spinner=False)
+def _build_time_series_cached(df, group_cols, metric):
+    return build_time_series(df, group_cols, metric)
+
+
+@st.cache_data(show_spinner=False)
+def _detect_temporal_cached(ts, group_cols, method, window, threshold):
+    return detect_temporal_anomalies(
+        ts, group_cols=group_cols, method=method, window=window, threshold=threshold
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=50)
+def _detect_structural_cached(df, peer_group_cols, method, threshold, metric):
+    return detect_structural_anomalies(
+        df, peer_group_cols=peer_group_cols, method=method,
+        threshold=threshold, metric=metric,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _build_ranking_cached(ts_with_flags, entity_cols, last_month_only, top_n):
+    return build_alerts_ranking(
+        ts_with_flags, entity_cols=entity_cols,
+        last_month_only=last_month_only, top_n=top_n,
+    )
+
+
 METRIC_LABEL = {
     "precio_unitario": "Precio Unitario",
     "importe_total":   "Importe Total",
@@ -103,14 +140,12 @@ def _render_comparativa(df: pd.DataFrame, config: dict, prest_data: list[dict]) 
         df_p = df[df["Prestador ID"] == p["id"]].copy()
         if len(df_p) == 0:
             continue
-        ts = build_time_series(df_p, ["Prestador ID"], config["metric"])
+        ts = _build_time_series_cached(df_p, ["Prestador ID"], config["metric"])
         if len(ts) < 2:
             continue
-        ts = detect_temporal_anomalies(
-            ts, group_cols=["Prestador ID"],
-            method=config["temporal_method"],
-            window=config["window"],
-            threshold=config["threshold_temporal"],
+        ts = _detect_temporal_cached(
+            ts, ["Prestador ID"],
+            config["temporal_method"], config["window"], config["threshold_temporal"],
         )
         color = colores[i % len(colores)]
         fig.add_trace(go.Scatter(
@@ -240,19 +275,17 @@ def _tab_ranking(df: pd.DataFrame, config: dict) -> None:
     )
 
     with st.spinner("Calculando alertas..."):
-        ts = build_time_series(df, group_cols, config["metric"])
+        ts = _build_time_series_cached(df, group_cols, config["metric"])
         if len(ts) == 0:
             st.info("No hay datos para analizar")
             return
-        ts_with_flags = detect_temporal_anomalies(
-            ts, group_cols=group_cols,
-            method=config["temporal_method"],
-            window=config["window"],
-            threshold=config["threshold_temporal"],
+        ts_with_flags = _detect_temporal_cached(
+            ts, group_cols,
+            config["temporal_method"], config["window"], config["threshold_temporal"],
         )
-        ranking = build_alerts_ranking(
-            ts_with_flags, entity_cols=group_cols,
-            last_month_only=(scope == "Último mes"), top_n=top_n,
+        ranking = _build_ranking_cached(
+            ts_with_flags, group_cols,
+            (scope == "Último mes"), top_n,
         )
 
     if len(ranking) == 0:
@@ -298,17 +331,15 @@ def _render_temporal_view(
     )
 
     with st.spinner("Analizando..."):
-        ts = build_time_series(df, group_cols, config["metric"])
+        ts = _build_time_series_cached(df, group_cols, config["metric"])
         if len(ts) < 4:
             st.info(f"Muy pocos puntos temporales ({len(ts)} meses). Se necesitan al menos 4.")
             return
 
         if config["analysis_type"] in ("temporal", "ambos"):
-            ts = detect_temporal_anomalies(
-                ts, group_cols=group_cols,
-                method=config["temporal_method"],
-                window=config["window"],
-                threshold=config["threshold_temporal"],
+            ts = _detect_temporal_cached(
+                ts, group_cols,
+                config["temporal_method"], config["window"], config["threshold_temporal"],
             )
         else:
             ts["is_anomaly_temporal"] = False
@@ -415,11 +446,9 @@ def _render_structural_section(df: pd.DataFrame, config: dict) -> None:
     peer_cols = ["Prestacion ID", "Mes"]
 
     with st.spinner("Comparando contra pares..."):
-        df_struct = detect_structural_anomalies(
-            df, peer_group_cols=peer_cols,
-            method=config["structural_method"],
-            threshold=config["threshold_structural"],
-            metric=config["metric"],
+        df_struct = _detect_structural_cached(
+            df, peer_cols,
+            config["structural_method"], config["threshold_structural"], config["metric"],
         )
 
     total = len(df_struct)
