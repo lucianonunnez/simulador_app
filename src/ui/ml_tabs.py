@@ -20,7 +20,7 @@ from core.ml_predictor import (
     predecir_lightgbm,
     predecir_pablo,
 )
-from ui.formatters import format_currency, format_currency_full, format_quantity
+from ui.formatters import format_currency, format_quantity
 
 
 METRIC_LABEL = {

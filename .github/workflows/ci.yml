@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Liviano a propósito: lint + smoke tests no necesitan TensorFlow ni el
+      # resto del stack pesado. Los módulos bajo test (core.simulator,
+      # core.anomaly, ui.formatters) solo dependen de pandas/numpy.
+      - name: Instalar herramientas
+        run: pip install --no-cache-dir ruff pytest pandas numpy
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Tests
+        env:
+          PYTHONPATH: src
+        run: pytest tests/ -q

@@ -150,8 +150,6 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
                 coeff = np.polyfit(x, df_time[col_name].values, 1)
                 x_future  = np.arange(len(x), len(x) + 6)
                 vals_fut   = coeff[0] * x_future + coeff[1]
-                df_pred    = pd.DataFrame({"mes_dt": future_months, col_name: vals_fut})
-                df_plot    = pd.concat([df_time[["mes_dt", col_name]], df_pred])
 
                 all_ticks  = tick_vals + list(future_months)
                 all_labels = tick_texts + future_labels

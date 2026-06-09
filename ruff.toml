@@ -1,0 +1,11 @@
+# Configuración de ruff (linter).
+#
+# Ruleset conservador a propósito: solo errores "reales" (Pyflakes + errores de
+# sintaxis), no reglas de estilo. El código usa idioms intencionales como
+# `with tab: render(...)` en una sola línea (E701) que no queremos marcar.
+line-length = 120
+
+[lint]
+# E9  = errores de sintaxis / runtime
+# F   = Pyflakes (imports y variables sin usar, nombres indefinidos, etc.)
+select = ["E9", "F"]
