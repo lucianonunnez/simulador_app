@@ -177,9 +177,24 @@ def enriquecer_con_categoricas(df_features: pd.DataFrame, df_consumo: pd.DataFra
     return df_features.merge(modas, on=["Prestador ID", "Prestacion ID"], how="left")
 
 
+@st.cache_data(show_spinner=False)
+def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
+    """
+    Panel + lags/rolling + categóricas, todo en uno y cacheado.
+
+    Es la parte cara de la predicción (groupby + rolling sobre todo el panel).
+    Antes se rehacía en cada rerun y por cada modelo; cacheada por
+    (datos, métrica) se reusa entre LightGBM y la red, y entre interacciones.
+    """
+    panel = construir_panel(df_consumo, metric)
+    df_feat = agregar_features(panel)
+    return enriquecer_con_categoricas(df_feat, df_consumo)
+
+
 # ============================================================================
 # PREDICCIÓN
 # ============================================================================
+@st.cache_data(show_spinner=False)
 def predecir_lightgbm(
     df_consumo: pd.DataFrame,
     metric: str,
@@ -197,10 +212,8 @@ def predecir_lightgbm(
     features = metricas.get("features", [])
     cats = metricas.get("categorical_features", [])
 
-    # Preparar features igual que en entrenamiento
-    panel = construir_panel(df_consumo, metric)
-    df_feat = agregar_features(panel)
-    df_feat = enriquecer_con_categoricas(df_feat, df_consumo)
+    # Preparar features igual que en entrenamiento (cacheado)
+    df_feat = construir_features(df_consumo, metric)
 
     # Filtros opcionales
     if filtro_prestador is not None:
@@ -235,6 +248,7 @@ def predecir_lightgbm(
     return out.reset_index(drop=True)
 
 
+@st.cache_data(show_spinner=False)
 def predecir_pablo(
     df_consumo: pd.DataFrame,
     metric: str,
@@ -246,9 +260,7 @@ def predecir_pablo(
     metricas = load_metricas().get(f"pablo_corregido_{metric}", {})
     features = metricas.get("features", [])
 
-    panel = construir_panel(df_consumo, metric)
-    df_feat = agregar_features(panel)
-    df_feat = enriquecer_con_categoricas(df_feat, df_consumo)
+    df_feat = construir_features(df_consumo, metric)
 
     if filtro_prestador is not None:
         df_feat = df_feat[df_feat["Prestador ID"] == filtro_prestador]

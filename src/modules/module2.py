@@ -17,8 +17,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.data_loader import load_consumo_and_valores
-from core.simulator import normalize_dataframes
+from core.data_loader import get_normalized_consumo, load_consumo_and_valores
 from ui.anomaly_controls import render_anomaly_controls
 from ui.anomaly_tabs import render_tabs
 
@@ -40,8 +39,8 @@ def render() -> None:
 
     st.caption(f"Analizando **{len(df_consumo):,}** registros")
 
-    # --- Normalizar tipos (mismo helper que Módulo 1) ---
-    df_consumo, _ = normalize_dataframes(df_consumo, df_consumo.iloc[:0])
+    # --- Normalizar tipos (cacheado, mismo helper que Módulo 1) ---
+    df_consumo = get_normalized_consumo(df_consumo)
 
     # --- Controles en sidebar ---
     config = render_anomaly_controls()

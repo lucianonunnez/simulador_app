@@ -5,13 +5,10 @@ v0.5.2 — diseño Swiss Medical
 
 from __future__ import annotations
 
-import time
-
-import pandas as pd
 import streamlit as st
 
-from core.data_loader import load_consumo_and_valores
-from core.simulator import apply_simulation, merge_datasets, normalize_dataframes
+from core.data_loader import get_merged_dataset, load_consumo_and_valores
+from core.simulator import apply_simulation
 from ui.formatters import format_currency, format_currency_full
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -84,13 +81,6 @@ def _render_metrics(total_ideal: float, total_sim: float, dif: float, pct: float
 # ============================================================================
 
 def render() -> None:
-    _MODULO_ID = "module1"
-    if "ultimo_modulo" not in st.session_state:
-        st.session_state["ultimo_modulo"] = _MODULO_ID
-    elif st.session_state["ultimo_modulo"] != _MODULO_ID:
-        st.session_state["ultimo_modulo"] = _MODULO_ID
-        st.rerun()
-
     st.title("Módulo 1 — Simulador de Aumentos")
 
     df_consumo, df_valores = load_consumo_and_valores()
@@ -98,9 +88,17 @@ def render() -> None:
         _render_waiting_state(df_consumo is not None, df_valores is not None)
         return
 
-    df_merged = _process_with_feedback(df_consumo, df_valores)
-    if df_merged is None:
+    # Normalización + merge cacheados: solo se recalculan si cambian los datos,
+    # así no reaparece el indicador de progreso en cada interacción.
+    df_merged = get_merged_dataset(df_consumo, df_valores)
+    if df_merged is None or len(df_merged) == 0:
+        st.error(
+            "No se encontraron coincidencias entre Consumo y Valores. "
+            "Revisá que las claves (Prestador / Convenio / Prestación) coincidan."
+        )
         return
+
+    st.caption(f"Datos listos · **{len(df_merged):,}** registros")
 
     config = render_simulator_controls(df_merged)
 
@@ -179,31 +177,3 @@ def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
     - {"[cargado]" if consumo_loaded else "[pendiente]"} **Archivo de Consumo** (`consumo.xlsx`)
     - {"[cargado]" if valores_loaded else "[pendiente]"} **Archivo de Valores** (`valores.xlsx`)
     """)
-
-
-def _process_with_feedback(
-    df_consumo: pd.DataFrame, df_valores: pd.DataFrame
-) -> pd.DataFrame | None:
-    with st.status("Procesando datos...", expanded=True, state="running") as status:
-        st.write(f"Consumo leído → **{len(df_consumo):,}** filas")
-        time.sleep(0.15)
-        st.write(f"Valores leído → **{len(df_valores):,}** filas")
-        time.sleep(0.15)
-        st.write("Normalizando tipos de datos...")
-        df_consumo, df_valores = normalize_dataframes(df_consumo, df_valores)
-        st.write("Normalización completa")
-        time.sleep(0.15)
-        st.write("Uniendo datasets...")
-        df_merged = merge_datasets(df_consumo, df_valores)
-
-        if len(df_merged) == 0:
-            status.update(label="Error en el procesamiento", state="error", expanded=True)
-            st.write("**No se encontraron coincidencias entre Consumo y Valores.**")
-            return None
-
-        st.write(f"Merge completo → **{len(df_merged):,}** registros")
-        status.update(
-            label=f"Datos listos ({len(df_merged):,} registros)",
-            state="complete", expanded=False,
-        )
-    return df_merged
