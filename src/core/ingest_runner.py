@@ -96,3 +96,82 @@ def ejecutar_ingesta(mes: str | None = None) -> tuple[bool, str]:
         return False, "La ingesta superó los 30 minutos y fue cancelada."
     salida = (res.stdout or "") + (res.stderr or "")
     return res.returncode == 0, salida
+
+
+def _tiene_columna_mes(path: Path) -> bool:
+    """
+    True si el archivo trae columna 'Mes' (chequeo barato: solo encabezados).
+
+    Los exports CRUDOS de consumo no la traen (el período se elige al
+    descargar y no queda en el archivo) -> necesitan que el usuario asigne
+    el mes al ingerir.
+    """
+    import pandas as pd
+
+    try:
+        if path.suffix.lower() == ".csv":
+            from core.excel_utils import _decode_text
+
+            primera = _decode_text(path.read_bytes()[:65536]).split("\n", 1)[0]
+            headers = [h.strip().strip('"') for h in primera.split(",")]
+        else:
+            df = pd.read_excel(path, nrows=0, engine="openpyxl")
+            headers = [str(c).strip() for c in df.columns]
+        return "Mes" in headers
+    except Exception:
+        # Si no se puede leer, que lo resuelva (y reporte) la ingesta misma.
+        return True
+
+
+def pendientes_detalle() -> dict:
+    """
+    Pendientes con el detalle que necesita la UI:
+        {"todos": [nombres], "consumo_sin_mes": [nombres]}
+    Los de consumo_sin_mes requieren que el usuario indique el período.
+    """
+    todos = listar_pendientes()
+    consumo_dir = CARPETAS[0]
+    consumo_sin_mes = []
+    if consumo_dir.exists():
+        for p in sorted(consumo_dir.glob("*.xlsx")) + sorted(consumo_dir.glob("*.csv")):
+            if p.name in todos and not _tiene_columna_mes(p):
+                consumo_sin_mes.append(p.name)
+    return {"todos": todos, "consumo_sin_mes": consumo_sin_mes}
+
+
+def ejecutar_ingesta_detallada(
+    mes_por_archivo: dict[str, str] | None = None,
+) -> tuple[bool, str]:
+    """
+    Ingesta con mes POR ARCHIVO para los consumos crudos sin columna 'Mes':
+    cada uno corre con su período (--solo + --mes) y después una pasada
+    general para el resto (valores y archivos que ya traen Mes).
+    """
+    import os
+
+    def correr(extra: list[str]) -> tuple[bool, str]:
+        cmd = [sys.executable, str(SCRIPT_INGESTA), "--archivar", *extra]
+        # Sin warnings de openpyxl ("Workbook contains no default style")
+        # ensuciando el detalle que ve el usuario.
+        env = {**os.environ, "PYTHONWARNINGS": "ignore"}
+        try:
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=1800, env=env
+            )
+        except subprocess.TimeoutExpired:
+            return False, "La ingesta superó los 30 minutos y fue cancelada."
+        return res.returncode == 0, (res.stdout or "") + (res.stderr or "")
+
+    salidas: list[str] = []
+    ok_total = True
+
+    for nombre, mes in (mes_por_archivo or {}).items():
+        ok, salida = correr(["--solo", nombre, "--mes", mes])
+        ok_total = ok_total and ok
+        salidas.append(f"--- {nombre} (mes {mes}) ---\n{salida}")
+
+    ok, salida = correr([])
+    ok_total = ok_total and ok
+    salidas.append(salida)
+
+    return ok_total, "\n".join(salidas)

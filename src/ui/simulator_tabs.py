@@ -16,6 +16,7 @@ import streamlit as st
 logger = logging.getLogger(__name__)
 
 from core.cachekeys import df_fingerprint
+from ui.insights import insight_concentracion, insight_evolucion
 from core.indec import fetch_inflation
 from core.simulator import aggregate_top_n
 from ui.formatters import format_currency, format_currency_full, format_int, format_quantity
@@ -94,7 +95,9 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
     tick_vals  = df_time["mes_dt"].tolist()
     tick_texts = [_mes_label(d) for d in tick_vals]
 
-    def _line_fig(col_name: str, title: str) -> go.Figure:
+    def _line_fig(col_name: str, title: str, fmt) -> tuple[go.Figure, str | None]:
+        """Gráfico de línea + insight: anillo sutil sobre el pico y una línea
+        de texto que dice qué mirar."""
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=df_time["mes_dt"], y=df_time[col_name],
@@ -103,17 +106,37 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
             marker=dict(size=7, color=COLOR_ROJO),
             name=col_name,
         ))
+
+        texto = None
+        res = insight_evolucion(tick_texts, df_time[col_name].tolist(), fmt)
+        if res is not None:
+            i_pico, texto = res
+            fig.add_trace(go.Scatter(
+                x=[df_time["mes_dt"].iloc[i_pico]],
+                y=[df_time[col_name].iloc[i_pico]],
+                mode="markers",
+                marker=dict(size=18, color="rgba(228,0,43,0.12)",
+                            line=dict(color=COLOR_ROJO, width=2)),
+                showlegend=False, hoverinfo="skip",
+            ))
+
         layout = _layout_base(title=title)
         layout["xaxis"].update(tickvals=tick_vals, ticktext=tick_texts, title=dict(text="Mes"))
         layout["yaxis"].update(title=dict(text=col_name))
         fig.update_layout(**layout)
-        return fig
+        return fig, texto
 
     c1, c2 = st.columns(2)
     with c1:
-        st.plotly_chart(_line_fig("Cantidad CM", "Cantidad CM por Mes"), use_container_width=True)
+        fig, texto = _line_fig("Cantidad CM", "Cantidad CM por Mes", format_quantity)
+        st.plotly_chart(fig, use_container_width=True)
+        if texto:
+            st.caption(texto)
     with c2:
-        st.plotly_chart(_line_fig("Importe CM", "Costo CM por Mes"), use_container_width=True)
+        fig, texto = _line_fig("Importe CM", "Costo CM por Mes", format_currency)
+        st.plotly_chart(fig, use_container_width=True)
+        if texto:
+            st.caption(texto)
 
     # Pronóstico
     if len(df_time) >= 2:
@@ -245,6 +268,14 @@ def _tab_nomenclador(df: pd.DataFrame) -> None:
         st.plotly_chart(fig, use_container_width=True)
         st.caption("Se etiquetan los segmentos ≥ 5%; pasá el mouse para ver el resto.")
 
+    df_sin_otros = df_agg[df_agg[grouping].astype(str) != "Otros"]
+    texto = insight_concentracion(
+        df_sin_otros[grouping].tolist(), df_sin_otros["Consumo Ideal"].tolist(),
+        top_n=3, sufijo="del consumo",
+    )
+    if texto:
+        st.caption(texto)
+
     df_display = df_agg.copy()
     df_display["Consumo Ideal"]    = df_display["Consumo Ideal"].apply(format_currency)
     df_display["Consumo Simulado"] = df_display["Consumo Simulado"].apply(format_currency)
@@ -277,6 +308,14 @@ def _tab_top_prestaciones(df: pd.DataFrame) -> None:
     layout["hovermode"] = "y unified"
     fig.update_layout(**layout, barmode="group")
     st.plotly_chart(fig, use_container_width=True)
+
+    texto = insight_concentracion(
+        df_prest["Prestacion Desc"].tolist(),
+        df_prest["Consumo Ideal"].tolist(),
+        top_n=5, sufijo="del consumo total",
+    )
+    if texto:
+        st.caption(texto)
 
     df_display = top20.sort_values("Consumo Ideal", ascending=False).copy()
     df_display["Consumo Ideal"]    = df_display["Consumo Ideal"].apply(format_currency)

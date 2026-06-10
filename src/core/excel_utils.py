@@ -170,8 +170,20 @@ def normalize_mstr_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename: dict = {}
 
     def _share_numerica(c) -> float:
-        s = df[c].dropna().astype(str).head(200)
-        return to_numeric_tolerante(s).notna().mean() if len(s) else 0.0
+        # Columna COMPLETA, no una muestra: verificado con exports reales que
+        # las primeras filas son sesgadas (un consumo que arranca con
+        # Internación tiene códigos de texto al principio -> la muestra daba
+        # 55% numérico donde el total era 98,8%, y al revés con los flags de
+        # Convenio: 100% en muestra vs 1,2% real). Es vectorizado: barato.
+        s = df[c].dropna().astype(str)
+        if not len(s):
+            return 0.0
+        nums = to_numeric_tolerante(s)
+        share = float(nums.notna().mean())
+        # Una columna de puros ceros es un flag/placeholder, no un ID real.
+        if share > 0 and (nums.dropna() == 0).all():
+            return 0.0
+        return share
 
     def _largo_medio(c) -> float:
         s = df[c].dropna().astype(str).head(200)

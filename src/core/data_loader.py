@@ -208,12 +208,12 @@ def resumen_base() -> Optional[dict]:
 # INGESTA DESDE LA APP (detectar archivos nuevos en data/raw y unificarlos)
 # ============================================================================
 @st.cache_data(ttl=60, show_spinner=False)
-def _pendientes_cached(dir_state: tuple, db_state: str) -> list[str]:
-    """Escaneo de archivos sin ingerir, cacheado por estado de carpeta + base
-    (hashear un xlsx de 40 MB en cada rerun sería caro)."""
+def _pendientes_cached(dir_state: tuple, db_state: str) -> dict:
+    """Escaneo de archivos sin ingerir (y cuáles necesitan mes), cacheado por
+    estado de carpeta + base (hashear un xlsx de 40 MB por rerun sería caro)."""
     from core import ingest_runner
 
-    return ingest_runner.listar_pendientes()
+    return ingest_runner.pendientes_detalle()
 
 
 def _render_ingesta_pendiente() -> None:
@@ -235,16 +235,24 @@ def _render_ingesta_pendiente() -> None:
             st.success("Ingesta finalizada: archivos unificados a la base.")
         else:
             st.error("La ingesta tuvo errores (ver detalle).")
-        lineas = [ln for ln in (salida or "").splitlines() if ln.strip()]
-        st.code("\n".join(lineas[-25:]) or "(sin salida)", language=None)
+        lineas = [
+            ln for ln in (salida or "").splitlines()
+            if ln.strip()
+            and "no default style" not in ln
+            and "UserWarning" not in ln
+            and not ln.strip().startswith("warn(")
+        ]
+        st.code("\n".join(lineas[-30:]) or "(sin salida)", language=None)
 
     try:
-        pendientes = _pendientes_cached(
+        detalle = _pendientes_cached(
             ingest_runner.estado_carpetas(), _db_fingerprint()
         )
     except Exception:
         logger.exception("Error buscando archivos pendientes de ingesta")
         return
+    pendientes = detalle["todos"]
+    sin_mes = detalle["consumo_sin_mes"]
     if not pendientes:
         return
 
@@ -252,19 +260,33 @@ def _render_ingesta_pendiente() -> None:
     nombres = ", ".join(pendientes[:4]) + ("…" if len(pendientes) > 4 else "")
     st.info(f"**{len(pendientes)} archivo(s) nuevo(s)** en `data/raw/`: {nombres}")
 
-    mes_crudo = st.text_input(
-        "Mes de exports crudos (MM-YYYY)",
-        value="",
-        key="ingesta_mes",
-        help="Solo hace falta si algún archivo de consumo CRUDO no trae la "
-             "columna 'Mes' (el export de MicroStrategy no la incluye). "
-             "Usá el período que elegiste al descargarlo.",
-    )
+    # Los consumos CRUDOS no traen el período en el archivo: pedirlo POR
+    # archivo (cada descarga puede ser de un mes distinto).
+    mes_por_archivo: dict = {}
+    if sin_mes:
+        st.warning(
+            f"**{len(sin_mes)} archivo(s) de consumo necesitan el período** "
+            "(el export crudo no trae la columna 'Mes'). Completá el mes de "
+            "cada uno — el que quede vacío NO se ingiere todavía."
+        )
+        for nombre in sin_mes:
+            valor = st.text_input(
+                f"Mes de «{nombre}» (MM-YYYY)",
+                value="",
+                key=f"ingesta_mes_{nombre}",
+                placeholder="ej: 12-2025",
+                help="El período que elegiste en MicroStrategy al descargar este archivo.",
+            )
+            if valor.strip():
+                mes_por_archivo[nombre] = valor.strip()
 
     if st.button("Ingerir y unificar ahora", key="ingesta_btn", type="primary"):
-        mes = mes_crudo.strip() or None
-        if mes and not pd.Series([mes]).str.fullmatch(r"\d{2}-\d{4}").iloc[0]:
-            st.warning(f"El mes debe ser MM-YYYY (recibido: {mes}).")
+        invalidos = [
+            f"{n} ({m})" for n, m in mes_por_archivo.items()
+            if not pd.Series([m]).str.fullmatch(r"\d{2}-\d{4}").iloc[0]
+        ]
+        if invalidos:
+            st.warning(f"Mes inválido (debe ser MM-YYYY): {', '.join(invalidos)}")
             return
         with st.spinner("Ingiriendo y unificando archivos (puede tardar varios minutos)..."):
             # DuckDB no admite un escritor con lectores abiertos: cerrar la
@@ -274,7 +296,7 @@ def _render_ingesta_pendiente() -> None:
             except Exception:
                 logger.exception("No se pudo cerrar la conexión read-only")
             st.cache_resource.clear()
-            ok, salida = ingest_runner.ejecutar_ingesta(mes)
+            ok, salida = ingest_runner.ejecutar_ingesta_detallada(mes_por_archivo)
         st.session_state["_ingesta_resultado"] = (ok, salida)
         st.cache_data.clear()
         st.rerun()
