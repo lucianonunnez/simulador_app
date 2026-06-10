@@ -6,7 +6,15 @@ v0.6.0 — diseño Swiss Medical
 
 import html
 import logging
+import os
 from pathlib import Path
+
+# Silenciar el ruido informativo de TensorFlow en la terminal (banners de
+# oneDNN/AVX2 y deprecations de Keras). Debe setearse ANTES de que cualquier
+# módulo importe TF (el Módulo 3 lo hace lazy).
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 import streamlit as st
 

@@ -99,7 +99,7 @@ def _query_table(
         return None
 
     try:
-        con = _get_ro_connection()
+        con = _get_ro_connection().cursor()  # cursor propio: thread-safe
         if not table_exists(con, table):
             return None
 
@@ -139,24 +139,31 @@ def _query_table(
         return None
 
 
+# NOTA sobre concurrencia (bug visto en vivo): la conexión cacheada con
+# st.cache_resource se COMPARTE entre los hilos de las sesiones de Streamlit,
+# y una conexión DuckDB no es thread-safe — dos consultas simultáneas se
+# pisaban y fetchone() devolvía None ("cannot unpack non-iterable NoneType").
+# Por eso cada consulta usa un CURSOR propio (con.cursor(), barato y seguro
+# por hilo). Además, las funciones cacheadas dejan PROPAGAR las excepciones
+# (st.cache_data no cachea errores): un fallo transitorio —p.ej. el lock de
+# una ingesta— no deja un None pegado por 10 minutos; el wrapper de afuera
+# loguea y devuelve None solo para ese rerun.
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def _catalogo_prestadores(db_state: str) -> Optional[list]:
     """SELECT DISTINCT de prestadores (liviano) — para selectores."""
     if not DB_PATH.exists():
         return None
-    try:
-        con = _get_ro_connection()
-        if not table_exists(con, CONSUMO_TABLE):
-            return None
-        rows = con.execute(
-            f'SELECT DISTINCT "Prestador ID", "Prestador Desc" '
-            f'FROM "{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
-            f'ORDER BY "Prestador Desc"'
-        ).fetchall()
-        return rows or None
-    except Exception:
-        logger.exception("Error consultando el catálogo de prestadores")
+    con = _get_ro_connection().cursor()
+    if not table_exists(con, CONSUMO_TABLE):
         return None
+    rows = con.execute(
+        f'SELECT DISTINCT "Prestador ID", "Prestador Desc" '
+        f'FROM "{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
+        f'ORDER BY "Prestador Desc"'
+    ).fetchall()
+    return rows or None
 
 
 def get_prestadores_disponibles() -> Optional[list]:
@@ -167,7 +174,11 @@ def get_prestadores_disponibles() -> Optional[list]:
     datos del prestador elegido (filtro empujado al SQL de DuckDB), en vez de
     traer todo a RAM y filtrar en pandas. None si no hay base (modo upload).
     """
-    return _catalogo_prestadores(_db_fingerprint())
+    try:
+        return _catalogo_prestadores(_db_fingerprint())
+    except Exception:
+        logger.exception("Error consultando el catálogo de prestadores")
+        return None
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -175,33 +186,35 @@ def _resumen_base_cached(db_state: str) -> Optional[dict]:
     """Conteos livianos (COUNT/DISTINCT en SQL) para el panel de Inicio."""
     if not DB_PATH.exists():
         return None
-    try:
-        con = _get_ro_connection()
-        if not table_exists(con, CONSUMO_TABLE):
-            return None
-        filas, prestadores, meses = con.execute(
-            f'SELECT COUNT(*), COUNT(DISTINCT "Prestador ID"), '
-            f'COUNT(DISTINCT "Mes") FROM "{CONSUMO_TABLE}"'
-        ).fetchone()
-        tarifas = 0
-        if table_exists(con, VALORES_TABLE):
-            tarifas = con.execute(
-                f'SELECT COUNT(*) FROM "{VALORES_TABLE}"'
-            ).fetchone()[0]
-        return {
-            "filas": int(filas),
-            "prestadores": int(prestadores),
-            "meses": int(meses),
-            "tarifas": int(tarifas),
-        }
-    except Exception:
-        logger.exception("Error consultando el resumen de la base")
+    con = _get_ro_connection().cursor()
+    if not table_exists(con, CONSUMO_TABLE):
         return None
+    fila = con.execute(
+        f'SELECT COUNT(*), COUNT(DISTINCT "Prestador ID"), '
+        f'COUNT(DISTINCT "Mes") FROM "{CONSUMO_TABLE}"'
+    ).fetchone()
+    if fila is None:
+        return None
+    filas, prestadores, meses = fila
+    tarifas = 0
+    if table_exists(con, VALORES_TABLE):
+        t = con.execute(f'SELECT COUNT(*) FROM "{VALORES_TABLE}"').fetchone()
+        tarifas = int(t[0]) if t else 0
+    return {
+        "filas": int(filas),
+        "prestadores": int(prestadores),
+        "meses": int(meses),
+        "tarifas": int(tarifas),
+    }
 
 
 def resumen_base() -> Optional[dict]:
     """Estado de los datos cargados (para el panel de Inicio). None sin base."""
-    return _resumen_base_cached(_db_fingerprint())
+    try:
+        return _resumen_base_cached(_db_fingerprint())
+    except Exception:
+        logger.exception("Error consultando el resumen de la base")
+        return None
 
 
 # ============================================================================
