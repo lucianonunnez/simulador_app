@@ -258,24 +258,39 @@ def _render_ingesta_pendiente() -> None:
 
     st.divider()
     nombres = ", ".join(pendientes[:4]) + ("…" if len(pendientes) > 4 else "")
-    st.info(f"**{len(pendientes)} archivo(s) nuevo(s)** en `data/raw/`: {nombres}")
+    st.info(
+        f"**{len(pendientes)} archivo(s) nuevo(s)**: {nombres}. "
+        "Tip: soltá los exports en `data/a_procesar/` con el período en el "
+        "nombre (`05-2026-Consumo-1584.xlsx`) y entra todo solo — lo procesado "
+        "se mueve a `data/procesado/`."
+    )
 
-    # Los consumos CRUDOS no traen el período en el archivo: pedirlo POR
-    # archivo (cada descarga puede ser de un mes distinto).
+    # Los consumos CRUDOS no traen el período en el archivo (verificado: la
+    # metadata de MicroStrategy solo guarda la ruta del reporte y la fecha de
+    # descarga). Se pide POR archivo; si el nombre incluye MM-YYYY, se
+    # precarga solo (convención: "consumo 12-2025.xlsx").
     mes_por_archivo: dict = {}
     if sin_mes:
         st.warning(
             f"**{len(sin_mes)} archivo(s) de consumo necesitan el período** "
             "(el export crudo no trae la columna 'Mes'). Completá el mes de "
-            "cada uno — el que quede vacío NO se ingiere todavía."
+            "cada uno — el que quede vacío NO se ingiere todavía. "
+            "⚠️ Solo válido para descargas de UN mes: si el archivo abarca "
+            "varios meses, pedí el export CON la columna 'Mes' "
+            "(ver FUENTE_DATOS.md §9)."
         )
+        import re as _re
+
         for nombre in sin_mes:
+            match = _re.search(r"(\d{2}-\d{4})", nombre)
             valor = st.text_input(
                 f"Mes de «{nombre}» (MM-YYYY)",
-                value="",
+                value=match.group(1) if match else "",
                 key=f"ingesta_mes_{nombre}",
                 placeholder="ej: 12-2025",
-                help="El período que elegiste en MicroStrategy al descargar este archivo.",
+                help="El período que elegiste en MicroStrategy al descargar "
+                     "este archivo. Tip: si nombrás el archivo con el mes "
+                     "(ej: consumo 12-2025.xlsx) se completa solo.",
             )
             if valor.strip():
                 mes_por_archivo[nombre] = valor.strip()

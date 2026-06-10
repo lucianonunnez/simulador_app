@@ -191,12 +191,25 @@ def inject_css() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
+def _logo_mark(px: int = 13, gap: int = 3) -> str:
+    """Isotipo Swiss Medical en CSS puro: 4 cuadrados rojos en grilla 2x2
+    (la cruz blanca es el espacio entre ellos). Nítido a cualquier tamaño."""
+    cuadrado = (
+        f'<div style="width:{px}px; height:{px}px; background:#E4002B; '
+        f'border-radius:{max(px // 5, 2)}px;"></div>'
+    )
+    return (
+        f'<div style="display:grid; grid-template-columns:{px}px {px}px; '
+        f'gap:{gap}px;">{cuadrado * 4}</div>'
+    )
+
+
 def brand_header_sidebar() -> str:
     """HTML del bloque de marca del sidebar."""
-    return """
+    return f"""
     <div style="padding: 4px 0 14px 0; border-bottom: 1px solid #E9ECEF; margin-bottom: 12px;">
-        <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:10px; height:28px; background:#E4002B; border-radius:3px;"></div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            {_logo_mark(px=12, gap=3)}
             <div>
                 <div style="font-size:15px; font-weight:700; color:#212529; line-height:1.1;">
                     Simulador de Costo Médico
@@ -212,10 +225,10 @@ def brand_header_sidebar() -> str:
 
 def brand_header_login() -> str:
     """HTML del encabezado de la pantalla de login."""
-    return """
+    return f"""
     <div style="text-align:center; padding: 36px 0 8px 0;">
-        <div style="display:inline-flex; align-items:center; gap:10px;">
-            <div style="width:12px; height:34px; background:#E4002B; border-radius:3px;"></div>
+        <div style="display:inline-flex; align-items:center; gap:12px;">
+            {_logo_mark(px=16, gap=4)}
             <div style="text-align:left;">
                 <div style="font-size:22px; font-weight:700; color:#212529; line-height:1.1;">
                     Simulador de Costo Médico

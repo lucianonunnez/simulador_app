@@ -42,6 +42,12 @@ from core import excel_utils as xu  # noqa: E402
 
 RAW_DIR = Path("data") / "raw"
 
+# Bandeja unificada: cualquier export se suelta acá (sin separar por carpeta);
+# el tipo se detecta por contenido y el mes desde el nombre del archivo.
+# Lo procesado OK se mueve a PROCESADO_DIR.
+INBOX_DIR = Path("data") / "a_procesar"
+PROCESADO_DIR = Path("data") / "procesado"
+
 DATASETS = {
     "consumo": {
         "dir": RAW_DIR / "consumo",
@@ -133,11 +139,12 @@ def _upsert(con, table: str, key: tuple, df: pd.DataFrame) -> None:
     con.unregister("keys_new")
 
 
-def _archivar(path: Path) -> None:
-    """Mueve un archivo ya procesado a <carpeta>/procesados/ (la base DuckDB es
-    la fuente unificada; los archivos de entrada son solo material crudo)."""
-    dest_dir = path.parent / "procesados"
-    dest_dir.mkdir(exist_ok=True)
+def _archivar(path: Path, dest_dir: Path | None = None) -> None:
+    """Mueve un archivo ya procesado a <carpeta>/procesados/ (o al destino
+    indicado). La base DuckDB es la fuente unificada; los archivos de entrada
+    son solo material crudo."""
+    dest_dir = dest_dir if dest_dir is not None else path.parent / "procesados"
+    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / path.name
     if dest.exists():
         dest = dest_dir / f"{path.stem}_{datetime.now():%Y%m%d%H%M%S}{path.suffix}"
@@ -145,10 +152,42 @@ def _archivar(path: Path) -> None:
     print(f"    archivado -> {dest}")
 
 
-def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
-                  mes: str | None = None) -> tuple[int, bool]:
+def _preparar_consumo(df: pd.DataFrame, path: Path, mes: str | None):
+    """
+    Completa las columnas que el export CRUDO de consumo no trae.
+
+    'Mes': el período no queda en el archivo -> se resuelve, en orden, desde
+    el NOMBRE del archivo ('05-2026-Consumo-1584.xlsx') o desde --mes.
+    'Convenio ID': el export trae un flag, no el ID -> queda NULL y el merge
+    degrada a Prestador + Prestación.
+
+    Devuelve el df listo, o None si falta el período.
+    """
+    if "Mes" not in df.columns:
+        mes_archivo = xu.mes_desde_nombre(path.name) or mes
+        if mes_archivo:
+            df["Mes"] = mes_archivo
+            origen = "del nombre del archivo" if xu.mes_desde_nombre(path.name) else "de --mes"
+            print(f"    (export sin columna 'Mes': asignado {mes_archivo} {origen})")
+        else:
+            print(f"  ! {path.name}: el export no trae columna 'Mes'. "
+                  f"Nombrá el archivo con el período (ej: 05-2026-Consumo-1584.xlsx) "
+                  f"o corré con --mes MM-YYYY — saltando")
+            return None
+    if "Convenio ID" not in df.columns:
+        df["Convenio ID"] = pd.NA
+        print("    (export sin 'Convenio ID': queda NULL; "
+              "el merge usará Prestador + Prestación)")
+    return df
+
+
+def _process_file(con, tipo: str | None, ds: dict | None, path: Path,
+                  rebuild: bool, mes: str | None = None) -> tuple[int, bool]:
     """Procesa un archivo. Devuelve (filas_insertadas, procesado_ok) — ok
-    incluye 'ya estaba ingerido' (es archivable)."""
+    incluye 'ya estaba ingerido' (es archivable).
+
+    Con tipo=None (bandeja data/a_procesar) el tipo se detecta por el
+    CONTENIDO del archivo (clasificar_dataset)."""
     file_hash = _file_hash(path)
     if not rebuild and _already_ingested(con, file_hash):
         print(f"  - {path.name}: ya ingerido, saltando")
@@ -156,26 +195,27 @@ def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
 
     content = path.read_bytes()
     try:
-        df = xu.load_excel_smart(content, ds["expected"])
+        expected = ds["expected"] if ds else (
+            xu.EXPECTED_CONSUMO_COLS | xu.EXPECTED_VALORES_COLS
+        )
+        df = xu.load_excel_smart(content, expected)
     except Exception as e:
         print(f"  ! {path.name}: no se pudo leer ({e}) — saltando")
         return 0, False
 
-    # El export CRUDO de consumo no trae el período en el archivo: se asigna
-    # desde --mes. Tampoco trae 'Convenio ID' (la columna 'Convenio' es un
-    # flag): queda NULL y el merge degrada a Prestador + Prestación.
-    if tipo == "consumo" and "Mes" not in df.columns:
-        if mes:
-            df["Mes"] = mes
-            print(f"    (export sin columna 'Mes': asignado {mes} desde --mes)")
-        else:
-            print(f"  ! {path.name}: el export no trae columna 'Mes'. "
-                  f"Corré con --mes MM-YYYY para ingerirlo — saltando")
+    if tipo is None:
+        tipo = xu.clasificar_dataset(df.columns)
+        if tipo is None:
+            print(f"  ! {path.name}: no parece consumo ni valores "
+                  f"(sin 'Cantidad CM'/'Importe CM' ni 'Valor Convenido a HOY') — saltando")
             return 0, False
-    if tipo == "consumo" and "Convenio ID" not in df.columns:
-        df["Convenio ID"] = pd.NA
-        print("    (export sin 'Convenio ID': queda NULL; "
-              "el merge usará Prestador + Prestación)")
+        ds = DATASETS[tipo]
+        print(f"    (detectado como '{tipo}')")
+
+    if tipo == "consumo":
+        df = _preparar_consumo(df, path, mes)
+        if df is None:
+            return 0, False
 
     miss = xu.missing_columns(df, ds["expected"])
     if miss:
@@ -284,6 +324,22 @@ def main() -> int:
             total += filas
             if ok and args.archivar:
                 _archivar(path)
+
+    # Bandeja unificada: se suelta CUALQUIER export en data/a_procesar/ (sin
+    # separar por carpeta), el tipo se detecta por contenido y el mes desde el
+    # nombre ('05-2026-Consumo-1584.xlsx'). Lo procesado se mueve SIEMPRE a
+    # data/procesado/ (es el contrato de la bandeja).
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESADO_DIR.mkdir(parents=True, exist_ok=True)
+    files = sorted([*INBOX_DIR.glob("*.xlsx"), *INBOX_DIR.glob("*.csv")])
+    if args.solo:
+        files = [p for p in files if p.name == args.solo]
+    print(f"[a_procesar] {len(files)} archivo(s) en {INBOX_DIR}")
+    for path in files:
+        filas, ok = _process_file(con, None, None, path, args.rebuild, args.mes)
+        total += filas
+        if ok:
+            _archivar(path, PROCESADO_DIR)
 
     print(f"\nListo. {total:,} filas procesadas en esta corrida.")
     _print_status(con)

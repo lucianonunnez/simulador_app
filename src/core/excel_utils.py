@@ -357,3 +357,46 @@ def clean_dataset(
             df[col] = df[col].astype("Int64")
 
     return df
+
+
+# ============================================================================
+# FLUJO "A PROCESAR": helpers para la bandeja de entrada unificada
+# ============================================================================
+
+def mes_desde_nombre(nombre: str) -> str | None:
+    """
+    Extrae el período del NOMBRE del archivo, para los exports crudos que no
+    traen columna 'Mes' (el período no queda en el contenido — verificado).
+
+    Convención: arrancar el nombre con el período. Acepta:
+        '05-2026-Consumo-1584.xlsx'  -> '05-2026'
+        '05-26-Consumo-1584.xlsx'    -> '05-2026'  (año de 2 dígitos = 20YY)
+        'consumo 12-2025.xlsx'       -> '12-2025'  (MM-YYYY en cualquier parte)
+    Devuelve None si no hay un período válido (mes 01..12).
+    """
+    base = str(nombre)
+    m = re.search(r"\b(\d{2})-(\d{4})\b", base)
+    if not m:
+        m = re.match(r"^(\d{2})-(\d{2})\D", base)
+    if not m:
+        return None
+    mes, anio = m.group(1), m.group(2)
+    if not 1 <= int(mes) <= 12:
+        return None
+    if len(anio) == 2:
+        anio = f"20{anio}"
+    return f"{mes}-{anio}"
+
+
+def clasificar_dataset(columnas) -> str | None:
+    """
+    Detecta si un archivo es de 'consumo' o de 'valores' POR SU CONTENIDO
+    (encabezados, ya mapeados o crudos), para la bandeja data/a_procesar
+    donde se puede soltar cualquier export sin separarlo por carpeta.
+    """
+    cols = {str(c).strip() for c in columnas}
+    if "Valor Convenido a HOY" in cols:
+        return "valores"
+    if {"Cantidad CM", "Importe CM"} & cols:
+        return "consumo"
+    return None

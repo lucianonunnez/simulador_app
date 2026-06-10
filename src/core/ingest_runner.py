@@ -20,7 +20,8 @@ import sys
 from pathlib import Path
 
 RAW_DIR = Path("data") / "raw"
-CARPETAS = (RAW_DIR / "consumo", RAW_DIR / "valores")
+INBOX_DIR = Path("data") / "a_procesar"
+CARPETAS = (RAW_DIR / "consumo", RAW_DIR / "valores", INBOX_DIR)
 SCRIPT_INGESTA = Path("scripts") / "ingest.py"
 
 
@@ -98,14 +99,8 @@ def ejecutar_ingesta(mes: str | None = None) -> tuple[bool, str]:
     return res.returncode == 0, salida
 
 
-def _tiene_columna_mes(path: Path) -> bool:
-    """
-    True si el archivo trae columna 'Mes' (chequeo barato: solo encabezados).
-
-    Los exports CRUDOS de consumo no la traen (el período se elige al
-    descargar y no queda en el archivo) -> necesitan que el usuario asigne
-    el mes al ingerir.
-    """
+def _leer_headers(path: Path) -> list[str] | None:
+    """Encabezados crudos del archivo (chequeo barato, sin cargar los datos)."""
     import pandas as pd
 
     try:
@@ -113,30 +108,46 @@ def _tiene_columna_mes(path: Path) -> bool:
             from core.excel_utils import _decode_text
 
             primera = _decode_text(path.read_bytes()[:65536]).split("\n", 1)[0]
-            headers = [h.strip().strip('"') for h in primera.split(",")]
-        else:
-            df = pd.read_excel(path, nrows=0, engine="openpyxl")
-            headers = [str(c).strip() for c in df.columns]
-        return "Mes" in headers
+            return [h.strip().strip('"') for h in primera.split(",")]
+        df = pd.read_excel(path, nrows=0, engine="openpyxl")
+        return [str(c).strip() for c in df.columns]
     except Exception:
-        # Si no se puede leer, que lo resuelva (y reporte) la ingesta misma.
-        return True
+        return None
+
+
+def _necesita_mes(path: Path) -> bool:
+    """
+    True si el archivo es un consumo que NO puede resolver su período solo.
+
+    El período se resuelve, en orden: columna 'Mes' en el archivo > período en
+    el NOMBRE ('05-2026-Consumo-1584.xlsx'). Los archivos de valores nunca lo
+    necesitan (traen 'Mes Vigencia' como dato propio).
+    """
+    from core.excel_utils import clasificar_dataset, mes_desde_nombre
+
+    if mes_desde_nombre(path.name):
+        return False
+    headers = _leer_headers(path)
+    if headers is None:
+        return False  # que lo resuelva (y reporte) la ingesta misma
+    if "Mes" in headers:
+        return False
+    return clasificar_dataset(headers) == "consumo"
 
 
 def pendientes_detalle() -> dict:
     """
     Pendientes con el detalle que necesita la UI:
         {"todos": [nombres], "consumo_sin_mes": [nombres]}
-    Los de consumo_sin_mes requieren que el usuario indique el período.
+    Los de consumo_sin_mes requieren que el usuario indique el período
+    (no lo traen en el contenido NI en el nombre del archivo).
     """
-    todos = listar_pendientes()
-    consumo_dir = CARPETAS[0]
-    consumo_sin_mes = []
-    if consumo_dir.exists():
-        for p in sorted(consumo_dir.glob("*.xlsx")) + sorted(consumo_dir.glob("*.csv")):
-            if p.name in todos and not _tiene_columna_mes(p):
-                consumo_sin_mes.append(p.name)
-    return {"todos": todos, "consumo_sin_mes": consumo_sin_mes}
+    todos = set(listar_pendientes())
+    consumo_sin_mes = [
+        p.name for p in _archivos_entrada()
+        if p.name in todos and _necesita_mes(p)
+    ]
+    return {"todos": sorted(todos), "consumo_sin_mes": consumo_sin_mes}
 
 
 def ejecutar_ingesta_detallada(

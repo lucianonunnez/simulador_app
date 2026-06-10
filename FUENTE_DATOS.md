@@ -155,9 +155,20 @@ formato crudo automáticamente. Lo verificado con exports reales:
 
 **Limitaciones genuinas del export de consumo** (no resolubles por código,
 requieren decisión de producto):
-- **No trae columna `Mes`**: el período se elige al descargar y no queda en el
-  archivo. Pendiente: parámetro `--mes` en `scripts/ingest.py` o convención de
-  nombre de archivo.
+- **No trae columna `Mes`**: el período se elige al descargar y NO queda en
+  ningún lado del archivo (verificado: la hoja "Mozart Reports" solo guarda la
+  ruta del reporte y la fecha de descarga, no el filtro). Soluciones, de mejor
+  a peor:
+  1. **La definitiva (automática)**: agregar el atributo **Mes** al reporte
+     `consumo` en MicroStrategy (ruta: `\SMMP_Costo Medico\Profiles\...\
+     simulador\consumo`) — igual que el export curado histórico, que SÍ trae
+     una fila por mes. Con eso no hay nada manual y las descargas multi-mes
+     funcionan perfectas.
+  2. Convención de nombre: `consumo 12-2025.xlsx` → la app precarga el mes.
+  3. Manual: completar el campo "Mes de «archivo»" en la app (o `--mes` en el
+     script). **Solo válido para descargas de UN mes**: asignarle un mes único
+     a un export que abarca varios meses distorsiona la evolución temporal y
+     el upsert.
 - **No trae `Convenio ID`** (la columna `Convenio` trae un flag, no el ID).
   Pendiente: definir estrategia de merge (por `Convenio Desc`, o degradar a
   Prestador + Prestación resolviendo la vigencia más reciente).

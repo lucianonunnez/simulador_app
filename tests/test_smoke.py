@@ -518,3 +518,22 @@ def test_normalize_mstr_columns_columna_de_ceros_no_es_id():
     out = normalize_mstr_columns(df)
     assert "Convenio ID" not in out.columns
     assert "Convenio Desc" in out.columns
+
+
+# ----------------------------------------------------------------------------
+# core.excel_utils — bandeja "a procesar" (mes desde el nombre + clasificador)
+# ----------------------------------------------------------------------------
+def test_mes_desde_nombre():
+    from core.excel_utils import mes_desde_nombre
+    assert mes_desde_nombre("05-2026-Consumo-1584.xlsx") == "05-2026"
+    assert mes_desde_nombre("05-26-Consumo-1584.xlsx") == "05-2026"   # año corto
+    assert mes_desde_nombre("consumo 12-2025.xlsx") == "12-2025"      # en cualquier parte
+    assert mes_desde_nombre("consumo (1).csv") is None
+    assert mes_desde_nombre("13-2026-Consumo.xlsx") is None           # mes inválido
+
+
+def test_clasificar_dataset_por_contenido():
+    from core.excel_utils import clasificar_dataset
+    assert clasificar_dataset(["Prestador", "Valor Convenido a HOY"]) == "valores"
+    assert clasificar_dataset(["Prestador", "Cantidad CM", "Importe CM"]) == "consumo"
+    assert clasificar_dataset(["x", "y"]) is None
