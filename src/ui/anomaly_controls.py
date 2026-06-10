@@ -31,17 +31,17 @@ def render_anomaly_controls() -> dict:
         # --- Tipo de análisis ---
         analysis_label = st.radio(
             "Tipo de análisis",
-            ["Temporal", "Estructural", "Ambos (intersección)"],
+            ["Temporal", "Estructural", "Ambos"],
             help=(
                 "• **Temporal**: compara cada registro contra su propia historia.\n"
                 "• **Estructural**: compara cada registro contra sus pares del mismo mes.\n"
-                "• **Ambos**: solo marca alertas cuando los dos métodos coinciden."
+                "• **Ambos**: muestra los dos análisis, uno debajo del otro."
             ),
         )
         analysis_map = {
             "Temporal": "temporal",
             "Estructural": "estructural",
-            "Ambos (intersección)": "ambos",
+            "Ambos": "ambos",
         }
         config["analysis_type"] = analysis_map[analysis_label]
 

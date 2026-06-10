@@ -31,9 +31,8 @@ def render() -> None:
 
     if df_consumo is None:
         st.info(
-            "**Esperando datos** — Subí `consumo.xlsx` desde el sidebar "
-            "(expandí la sección **Carga de datos**). "
-            "Si ya lo cargaste en el Módulo 1, debería aparecer automáticamente."
+            "**Esperando datos** — Abrí la sección **«Carga de datos»** del menú "
+            "izquierdo y subí el archivo de Consumo (o corré `python scripts/ingest.py`)."
         )
         return
 

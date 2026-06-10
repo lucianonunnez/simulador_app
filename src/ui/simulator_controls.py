@@ -37,19 +37,37 @@ def _parse_meses(df_merged: pd.DataFrame) -> dict[str, str]:
     return {k: v[2] for k, v in resultado_ordenado.items()}
 
 
-def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
+def render_simulator_controls(
+    df_merged: pd.DataFrame, prestadores: list | None = None
+) -> dict:
+    """
+    Controles del simulador.
+
+    Args:
+        df_merged: datos (posiblemente ya filtrados por prestador).
+        prestadores: catálogo completo [(id, desc), ...] para el selector.
+            Cuando los datos vienen filtrados por prestador (push-down a
+            DuckDB), las opciones deben salir del catálogo y no de df_merged
+            (que solo contiene el prestador elegido). None = derivar de
+            df_merged (modo upload, comportamiento histórico).
+    """
     config = {}
 
     # ── Fila 1: Prestador + Tipo de Aumento ──
     col_prest, col_modo = st.columns([4, 4])
 
     with col_prest:
-        prestadores = (
-            df_merged[["Prestador ID", "Prestador Desc"]]
-            .drop_duplicates().sort_values("Prestador Desc")
-        )
-        prestadores["label"] = prestadores["Prestador ID"].astype(str) + " - " + prestadores["Prestador Desc"]
-        options  = ["TODOS"] + prestadores["label"].tolist()
+        if prestadores:
+            labels = [f"{int(pid)} - {desc}" for pid, desc in prestadores]
+        else:
+            prest_df = (
+                df_merged[["Prestador ID", "Prestador Desc"]]
+                .drop_duplicates().sort_values("Prestador Desc")
+            )
+            labels = (
+                prest_df["Prestador ID"].astype(str) + " - " + prest_df["Prestador Desc"]
+            ).tolist()
+        options  = ["TODOS"] + labels
         selected = st.selectbox("Prestador", options, key="sim_prest")
 
     with col_modo:

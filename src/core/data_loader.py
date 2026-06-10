@@ -51,6 +51,22 @@ def _as_tuple(x: Optional[Iterable]) -> Optional[tuple]:
 # ============================================================================
 # CONSULTA A DUCKDB
 # ============================================================================
+def _db_fingerprint() -> str:
+    """
+    Identidad del estado de la base (mtime + tamaño del archivo).
+
+    Se pasa como argumento de las funciones cacheadas: cuando la ingesta
+    reescribe la base, el fingerprint cambia y el caché se invalida solo.
+    Antes, los datos recién ingeridos tardaban hasta 10 min (el TTL) en
+    aparecer en la app.
+    """
+    try:
+        s = DB_PATH.stat()
+        return f"{s.st_mtime_ns}-{s.st_size}"
+    except OSError:
+        return "no-db"
+
+
 @st.cache_resource(ttl=600, show_spinner=False)
 def _get_ro_connection():
     """
@@ -68,12 +84,14 @@ def _query_table(
     mes_col: str,
     prestador_ids: Optional[tuple],
     meses: Optional[tuple],
+    db_state: str = "",
 ) -> Optional[pd.DataFrame]:
     """
     Consulta una tabla de DuckDB con filtros opcionales empujados al SQL.
 
     Devuelve None si la base/tabla no existe o no hay filas (para que la capa
-    de arriba muestre el fallback de upload manual). Cacheado 10 min.
+    de arriba muestre el fallback de upload manual). Cacheado 10 min, con
+    invalidación automática al reingerir (db_state = fingerprint de la base).
     """
     if not DB_PATH.exists():
         return None
@@ -117,6 +135,37 @@ def _query_table(
                 "si persiste, contactá al equipo técnico."
             )
         return None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _catalogo_prestadores(db_state: str) -> Optional[list]:
+    """SELECT DISTINCT de prestadores (liviano) — para selectores."""
+    if not DB_PATH.exists():
+        return None
+    try:
+        con = _get_ro_connection()
+        if not table_exists(con, CONSUMO_TABLE):
+            return None
+        rows = con.execute(
+            f'SELECT DISTINCT "Prestador ID", "Prestador Desc" '
+            f'FROM "{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
+            f'ORDER BY "Prestador Desc"'
+        ).fetchall()
+        return rows or None
+    except Exception:
+        logger.exception("Error consultando el catálogo de prestadores")
+        return None
+
+
+def get_prestadores_disponibles() -> Optional[list]:
+    """
+    Catálogo [(id, desc), ...] de prestadores SIN cargar las tablas completas.
+
+    Permite que la UI renderice el selector primero y cargue después solo los
+    datos del prestador elegido (filtro empujado al SQL de DuckDB), en vez de
+    traer todo a RAM y filtrar en pandas. None si no hay base (modo upload).
+    """
+    return _catalogo_prestadores(_db_fingerprint())
 
 
 # ============================================================================
@@ -170,9 +219,10 @@ def load_consumo_and_valores(
     """
     pid = _as_tuple(prestador_ids)
     mes = _as_tuple(meses)
+    estado = _db_fingerprint()
 
-    df_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes)
-    df_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes)
+    df_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes, estado)
+    df_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes, estado)
 
     need_fallback = df_consumo is None or df_valores is None
 
@@ -181,6 +231,16 @@ def load_consumo_and_valores(
             st.success(f"Consumo: {len(df_consumo):,} filas")
         if df_valores is not None:
             st.success(f"Valores: {len(df_valores):,} filas")
+
+        if st.button(
+            "Recargar datos",
+            key="reload_data",
+            help="Vacía el caché y vuelve a leer la base "
+                 "(útil tras correr la ingesta).",
+        ):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.rerun()
 
         # ---- Fallback: upload manual si falta algún dataset ----
         if df_consumo is None:
@@ -235,6 +295,23 @@ def get_merged_dataset(
 
     c, v = normalize_dataframes(df_consumo, df_valores)
     return merge_datasets(c, v)
+
+
+def load_merged_completo() -> Optional[pd.DataFrame]:
+    """
+    Consumo + valores COMPLETOS (sin filtro de prestador) ya mergeados, sin
+    renderizar UI.
+
+    Para vistas que comparan entre prestadores (tab Comparativa) cuando la
+    carga principal del módulo vino filtrada por el push-down. Todo cacheado:
+    después de la primera carga es gratis.
+    """
+    estado = _db_fingerprint()
+    c = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, None, None, estado)
+    v = _query_table(VALORES_TABLE, VALORES_MES_COL, None, None, estado)
+    if c is None or v is None:
+        return None
+    return get_merged_dataset(c, v)
 
 
 @st.cache_data(ttl=600, show_spinner=False)

@@ -45,8 +45,8 @@ def render() -> None:
     df_consumo, _ = load_consumo_and_valores()
     if df_consumo is None:
         st.info(
-            "**Esperando datos** — Subí `consumo.xlsx` desde el sidebar. "
-            "Si ya lo cargaste en el Módulo 1, debería aparecer automáticamente."
+            "**Esperando datos** — Abrí la sección **«Carga de datos»** del menú "
+            "izquierdo y subí el archivo de Consumo (o corré `python scripts/ingest.py`)."
         )
         return
 

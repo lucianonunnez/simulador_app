@@ -20,9 +20,16 @@ import logging
 import streamlit as st
 import streamlit_authenticator as stauth
 
+from core import ratelimit
 from core.audit import log_event
 
 logger = logging.getLogger(__name__)
+
+
+def _clave_ratelimit() -> str:
+    """Clave para el lockout: el último username intentado si se conoce
+    (queda en session_state tras el primer intento), o un bucket global."""
+    return st.session_state.get("username") or "global"
 
 
 def _build_authenticator() -> stauth.Authenticate:
@@ -81,6 +88,16 @@ def require_login() -> None:
     # Guardamos el authenticator en session_state para poder usar el logout
     st.session_state["_authenticator"] = authenticator
 
+    # Lockout anti fuerza bruta: si hubo demasiados intentos fallidos
+    # recientes, frenar ANTES de procesar credenciales.
+    restante = ratelimit.segundos_bloqueado(_clave_ratelimit())
+    if restante > 0:
+        st.error(
+            f"Demasiados intentos fallidos. El acceso queda bloqueado "
+            f"{restante // 60 + 1} minuto(s) más por seguridad."
+        )
+        st.stop()
+
     # El método login() muestra el formulario y actualiza session_state
     # con authentication_status, name, username.
     try:
@@ -117,8 +134,10 @@ def _audit_login(status) -> None:
         if not st.session_state.get("_audit_login_logged"):
             log_event("login_success", username=username, success=True)
             st.session_state["_audit_login_logged"] = True
+        ratelimit.reset(username or "global")
     elif status is False and prev is not False:
         log_event("login_failed", username=username, success=False)
+        ratelimit.registrar_fallo(username or "global")
 
     st.session_state["_audit_last_status"] = status
 
