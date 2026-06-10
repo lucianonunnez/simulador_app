@@ -28,7 +28,7 @@ logging.basicConfig(
 # ============================================================================
 st.set_page_config(
     page_title="Simulador Costo Médico",
-    page_icon="🏥",
+    page_icon="src/ui/assets/favicon.png",  # isotipo Swiss Medical
     layout="wide",
     initial_sidebar_state="expanded",
 )
