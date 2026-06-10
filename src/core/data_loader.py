@@ -21,6 +21,8 @@ from typing import Iterable, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from core.cachekeys import df_fingerprint
+
 logger = logging.getLogger(__name__)
 
 from core.db import (
@@ -286,7 +288,7 @@ def load_consumo_and_valores(
 # de "Procesando datos..." reaparecía a cada interacción (el "parpadeo"). Acá
 # se cachean: solo se recalculan cuando cambian los datos de entrada.
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_merged_dataset(
     df_consumo: pd.DataFrame, df_valores: pd.DataFrame
 ) -> pd.DataFrame:
@@ -314,7 +316,7 @@ def load_merged_completo() -> Optional[pd.DataFrame]:
     return get_merged_dataset(c, v)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_normalized_consumo(df_consumo: pd.DataFrame) -> pd.DataFrame:
     """Normaliza tipos del dataset de consumo (cacheado). Usado por Mód. 2 y 3."""
     from core.simulator import normalize_dataframes

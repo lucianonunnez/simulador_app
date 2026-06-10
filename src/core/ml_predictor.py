@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from core.cachekeys import df_fingerprint
+
 # Imports lazy para que la app no falle si TF no está instalado
 _tf = None
 _lgb = None
@@ -203,7 +205,8 @@ def enriquecer_con_categoricas(df_features: pd.DataFrame, df_consumo: pd.DataFra
     return df_features.merge(modas, on=["Prestador ID", "Prestacion ID"], how="left")
 
 
-@st.cache_data(show_spinner=False, max_entries=20)
+@st.cache_data(show_spinner=False, max_entries=20,
+               hash_funcs={pd.DataFrame: df_fingerprint})
 def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     """
     Panel + lags/rolling + categóricas, todo en uno y cacheado.
@@ -220,7 +223,8 @@ def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
 # ============================================================================
 # PREDICCIÓN
 # ============================================================================
-@st.cache_data(show_spinner=False, max_entries=20)
+@st.cache_data(show_spinner=False, max_entries=20,
+               hash_funcs={pd.DataFrame: df_fingerprint})
 def predecir_lightgbm(
     df_consumo: pd.DataFrame,
     metric: str,
@@ -282,7 +286,8 @@ def predecir_lightgbm(
     return out.reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False, max_entries=20)
+@st.cache_data(show_spinner=False, max_entries=20,
+               hash_funcs={pd.DataFrame: df_fingerprint})
 def predecir_pablo(
     df_consumo: pd.DataFrame,
     metric: str,

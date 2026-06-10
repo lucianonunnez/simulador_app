@@ -19,6 +19,7 @@ import streamlit as st
 
 from core.data_loader import get_normalized_consumo, load_consumo_and_valores
 from ui.anomaly_controls import render_anomaly_controls
+from ui.formatters import format_int
 from ui.anomaly_tabs import render_tabs
 
 
@@ -36,7 +37,7 @@ def render() -> None:
         )
         return
 
-    st.caption(f"Analizando **{len(df_consumo):,}** registros")
+    st.caption(f"Analizando **{format_int(len(df_consumo))}** registros")
 
     # --- Normalizar tipos (cacheado, mismo helper que Módulo 1) ---
     df_consumo = get_normalized_consumo(df_consumo)

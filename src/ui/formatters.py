@@ -44,6 +44,13 @@ def format_quantity(value: float) -> str:
     return _es_ar(value)
 
 
+def format_int(value: float) -> str:
+    """Entero es-AR: 1.234.567 (para contadores de filas/registros)."""
+    if pd.isna(value):
+        return "0"
+    return _es_ar(float(value), decimals=0)
+
+
 def safe_pct(num: float, den: float) -> float | None:
     """
     num / den * 100, o None si el denominador es 0/NaN.

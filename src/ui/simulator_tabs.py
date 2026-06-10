@@ -15,9 +15,10 @@ import streamlit as st
 
 logger = logging.getLogger(__name__)
 
+from core.cachekeys import df_fingerprint
 from core.indec import fetch_inflation
 from core.simulator import aggregate_top_n
-from ui.formatters import format_currency, format_currency_full, format_quantity
+from ui.formatters import format_currency, format_currency_full, format_int, format_quantity
 from ui.theme import (
     COLOR_BLANCO,   # noqa: F401  (re-export histórico)
     COLOR_FONDO,
@@ -457,6 +458,21 @@ def _tab_comparativa(df_merged: pd.DataFrame, prestador_id: int | None) -> None:
 # ----------------------------------------------------------------------------
 # TAB 5: DATOS DETALLADOS
 # ----------------------------------------------------------------------------
+
+# Tope de filas a RENDERIZAR en pantalla. Con volumen real (cientos de miles
+# de filas), serializar la tabla completa a Arrow en cada rerun tardaba
+# segundos y dejaba colgados los elementos "fantasma" de la página anterior.
+# La descarga CSV sigue incluyendo todo.
+_MAX_FILAS_TABLA = 1_000
+
+
+@st.cache_data(show_spinner=False, max_entries=5,
+               hash_funcs={pd.DataFrame: df_fingerprint})
+def _csv_completo(df: pd.DataFrame, cols: tuple) -> bytes:
+    """CSV de descarga cacheado: generarlo en cada rerun costaba segundos."""
+    return df[list(cols)].to_csv(index=False).encode("utf-8")
+
+
 def _tab_datos(df: pd.DataFrame) -> None:
     st.subheader("Datos Detallados")
 
@@ -487,7 +503,9 @@ def _tab_datos(df: pd.DataFrame) -> None:
     </div>
     """, unsafe_allow_html=True)
 
-    df_display = df[cols_show].copy()
+    # Formatear y mostrar solo el tope de filas (el formateo .apply por celda
+    # sobre cientos de miles de filas también costaba segundos por rerun).
+    df_display = df[cols_show].head(_MAX_FILAS_TABLA).copy()
     for col, fn in [
         ("Cantidad CM",        format_quantity),
         ("Valor Convenido a HOY", format_currency_full),
@@ -499,8 +517,13 @@ def _tab_datos(df: pd.DataFrame) -> None:
             df_display[col] = df_display[col].apply(fn)
 
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+    if len(df) > _MAX_FILAS_TABLA:
+        st.caption(
+            f"Mostrando las primeras {format_int(_MAX_FILAS_TABLA)} de {format_int(len(df))} filas. "
+            "La descarga CSV incluye el detalle completo."
+        )
 
-    csv = df[cols_show].to_csv(index=False).encode("utf-8")
+    csv = _csv_completo(df, tuple(cols_show))
     st.download_button("Descargar datos (CSV)", csv, "simulacion.csv", "text/csv")
 
 
@@ -516,10 +539,10 @@ def _tab_analisis(df: pd.DataFrame) -> None:
     pct         = (dif / total_ideal * 100) if total_ideal > 0 else 0
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Registros",    f"{len(df):,}")
-    c2.metric("Prestadores",  f"{df['Prestador ID'].nunique():,}")
-    c3.metric("Nomencladores",f"{df['Nomenclador'].nunique():,}")
-    c4.metric("Prestaciones", f"{df['Prestacion ID'].nunique():,}")
+    c1.metric("Registros",    format_int(len(df)))
+    c2.metric("Prestadores",  format_int(df["Prestador ID"].nunique()))
+    c3.metric("Nomencladores",format_int(df["Nomenclador"].nunique()))
+    c4.metric("Prestaciones", format_int(df["Prestacion ID"].nunique()))
 
     st.divider()
 

@@ -16,6 +16,7 @@ import streamlit as st
 
 from core.data_loader import get_normalized_consumo, load_consumo_and_valores
 from core.ml_predictor import modelos_disponibles
+from ui.formatters import format_int
 from ui.ml_controls import render_ml_controls
 from ui.ml_tabs import render_tabs
 
@@ -50,7 +51,7 @@ def render() -> None:
         )
         return
 
-    st.caption(f"Dataset cargado: **{len(df_consumo):,}** registros")
+    st.caption(f"Dataset cargado: **{format_int(len(df_consumo))}** registros")
 
     df_consumo = get_normalized_consumo(df_consumo)
 

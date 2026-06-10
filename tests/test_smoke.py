@@ -17,6 +17,7 @@ import pytest
 
 from core import ratelimit
 from core.anomaly import compute_metric, detect_structural_anomalies, parse_month
+from core.cachekeys import df_fingerprint
 from core.excel_utils import (
     CONSUMO_NUMERIC_COLS,
     EXPECTED_VALORES_COLS,
@@ -224,6 +225,22 @@ def test_format_currency_full_es_ar():
 
 def test_format_quantity_es_ar():
     assert format_quantity(1_234.56) == "1.234,56"
+
+
+def test_df_fingerprint_distingue_contenido():
+    """La huella barata de caché debe ser estable para el mismo contenido y
+    distinta cuando cambian los datos numéricos (filtro, prestador, mes)."""
+    a = pd.DataFrame({"x": [1, 2], "y": ["a", "b"]})
+    b = pd.DataFrame({"x": [1, 3], "y": ["a", "b"]})
+    assert df_fingerprint(a) == df_fingerprint(a.copy())
+    assert df_fingerprint(a) != df_fingerprint(b)            # contenido distinto
+    assert df_fingerprint(a) != df_fingerprint(a.head(1))    # largo distinto
+
+
+def test_format_int_es_ar():
+    from ui.formatters import format_int
+    assert format_int(644_984) == "644.984"
+    assert format_int(0) == "0"
 
 
 def test_safe_pct_evita_inf_y_nan():
