@@ -19,6 +19,9 @@ import pandas as pd
 
 MERGE_KEYS = ["Prestador ID", "Convenio ID", "Prestacion ID"]
 
+# Columna de vigencia del tarifario (histórico de tarifas por prestación).
+VALORES_MES_COL = "Mes Vigencia"
+
 
 # ============================================================================
 # NORMALIZACIÓN
@@ -57,43 +60,95 @@ def normalize_dataframes(
 # ============================================================================
 # MERGE
 # ============================================================================
+def _dedup_vigencia(df_valores: pd.DataFrame, keys: list[str] | None = None) -> pd.DataFrame:
+    """
+    Deja UNA tarifa por clave de merge: la de la vigencia más reciente.
+
+    El tarifario ('valores') tiene histórico: varias filas 'Mes Vigencia' por
+    prestación. Como el merge NO une por mes, sin esto cada fila de consumo
+    matchearía todas las vigencias -> producto cartesiano -> Consumo Ideal/Simulado
+    inflados (doble conteo). Tomamos la vigencia más reciente porque la columna de
+    interés es "Valor Convenido a HOY" (el valor vigente). Es el mismo criterio
+    del proceso real del negocio ("Max Vigencia primeros 1" en sus workbooks).
+
+    NOTA: si en el futuro se quisiera el valor histórico exacto de cada mes de
+    consumo, esto debería reemplazarse por un as-of join (vigencia <= mes consumo).
+    """
+    keys = keys if keys is not None else list(MERGE_KEYS)
+    if VALORES_MES_COL not in df_valores.columns:
+        return df_valores
+    if not set(keys).issubset(df_valores.columns):
+        return df_valores
+
+    tmp = df_valores.copy()
+    tmp["_vig_dt"] = pd.to_datetime(tmp[VALORES_MES_COL], format="%m-%Y", errors="coerce")
+    tmp = (
+        tmp.sort_values("_vig_dt", na_position="first")
+        .drop_duplicates(subset=keys, keep="last")
+        .drop(columns="_vig_dt")
+    )
+    return tmp
+
+
+def _merge_keys_disponibles(
+    df_consumo: pd.DataFrame, df_valores: pd.DataFrame
+) -> list[str]:
+    """
+    Claves de merge utilizables según lo que traen los datos.
+
+    El export CRUDO de consumo no trae 'Convenio ID' (la columna 'Convenio'
+    es un flag). En ese caso el merge se degrada a Prestador + Prestación,
+    igual que el proceso real del negocio (que resuelve la tarifa por
+    prestación con la vigencia más reciente).
+    """
+    keys = list(MERGE_KEYS)
+    for df in (df_consumo, df_valores):
+        if "Convenio ID" not in df.columns or df["Convenio ID"].isna().all():
+            return [k for k in keys if k != "Convenio ID"]
+    return keys
+
+
 def merge_datasets(df_consumo: pd.DataFrame, df_valores: pd.DataFrame) -> pd.DataFrame:
     """
-    Une consumo con valores usando Prestador + Convenio + Prestación.
+    Une consumo con valores usando Prestador + Convenio + Prestación
+    (o Prestador + Prestación si 'Convenio ID' no viene en los datos).
 
     Cada fila de consumo se enriquece con el "Valor Convenido a HOY" del tarifario.
+    Se deduplica el tarifario a una vigencia por clave para evitar doble conteo.
     """
+    keys = _merge_keys_disponibles(df_consumo, df_valores)
+    df_valores = _dedup_vigencia(df_valores, keys)
+
     df_merged = pd.merge(
         df_consumo,
         df_valores,
-        on=MERGE_KEYS,
+        on=keys,
         how="inner",
         suffixes=("", "_val"),
+        validate="m:1",  # cada clave del tarifario es única tras el dedup
     )
 
-    # Si el merge con 3 claves no dio nada, intentar con clave concatenada
-    # (a veces los tipos de datos no matchean aunque semánticamente sean iguales)
-    if len(df_merged) == 0:
-        c = df_consumo.copy()
-        v = df_valores.copy()
-        c["_key"] = (
-            c["Prestador ID"].astype(str) + "|" +
-            c["Convenio ID"].astype(str) + "|" +
-            c["Prestacion ID"].astype(str)
-        )
-        v["_key"] = (
-            v["Prestador ID"].astype(str) + "|" +
-            v["Convenio ID"].astype(str) + "|" +
-            v["Prestacion ID"].astype(str)
-        )
-        df_merged = pd.merge(c, v, on="_key", how="inner", suffixes=("", "_val"))
-        drop_cols = [
-            col for col in df_merged.columns
-            if col.endswith("_val") and col.replace("_val", "") in MERGE_KEYS
-        ]
-        df_merged = df_merged.drop(columns=drop_cols + ["_key"], errors="ignore")
-
+    # Nota: el viejo fallback de "clave concatenada" se eliminó — tras
+    # normalize_dataframes ambos lados ya son Int64, así que stringificar las
+    # mismas claves daba el mismo resultado (era un no-op). Un merge vacío o
+    # parcial se reporta vía merge_match_rate() en la UI.
     return df_merged
+
+
+def merge_match_rate(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> float:
+    """
+    Fracción (0..1) de filas de consumo que encontraron tarifa en el merge.
+
+    El inner join descarta en silencio el consumo sin tarifa: si el tarifario
+    es de otro prestador, el resultado puede ser 0 filas sin ningún error.
+    Validado con datos reales: un 'valores' de otro prestador dio match 0%.
+    La UI usa este número para advertir cuando la cobertura es baja.
+    """
+    if len(df_consumo) == 0:
+        return 0.0
+    # Tras el dedup de vigencia el merge es m:1 -> cada fila de df_merged
+    # corresponde a exactamente una fila de consumo que matcheó.
+    return min(len(df_merged) / len(df_consumo), 1.0)
 
 
 # ============================================================================
@@ -122,7 +177,11 @@ def apply_simulation(
     Args:
         df_merged: resultado de merge_datasets, con columnas Cantidad CM y
             Valor Convenido a HOY.
-        months: cantidad de meses a proyectar.
+        months: multiplicador de la cantidad. IMPORTANTE: si "Cantidad CM" ya
+            es el acumulado de la ventana de liquidación (como en los exports
+            del negocio, p.ej. 12 meses), debe ser 1 — con 12 el impacto se
+            infla 12x. Validado contra simulaciones reales del negocio:
+            months=1 reproduce el "Impacto anual" con desvío 0.0000%.
         mode: "plano", "por_nomenclador" o "por_prestacion".
         flat_pct: usado cuando mode="plano".
         nomenclador_pcts: dict {nomenclador: %} cuando mode="por_nomenclador".
@@ -169,6 +228,57 @@ def apply_simulation(
     )
 
     return df
+
+
+# ============================================================================
+# MÉTRICAS DE NEGOCIACIÓN (réplica del workbook del negocio)
+# ============================================================================
+def impact_metrics(
+    df_sim: pd.DataFrame,
+    pauta_pct: float | None = None,
+    n_meses: int = 12,
+) -> dict:
+    """
+    Métricas de impacto del proceso de negociación, sobre un escenario simulado.
+
+    Réplica 1:1 de las fórmulas del workbook real de negociación (verificadas
+    contra dos simulaciones del negocio con desvío 0.0000%):
+
+        impacto       = Σ Consumo Simulado − Σ Consumo Ideal   (ventana completa)
+        impacto_pct   = Σ Simulado / Σ Ideal − 1
+        impacto_mensual = impacto / n_meses
+        extrapauta    = Σ Simulado − Σ Ideal × (1 + pauta)     (si hay pauta)
+        extrapauta_pct = Σ Simulado / (Σ Ideal × (1+pauta)) − 1
+
+    Args:
+        df_sim: resultado de apply_simulation (sobre el universo simulable,
+            es decir, ya sin las filas "No pauta"/excluidas).
+        pauta_pct: % de pauta de referencia autorizado (ej: 2.2). El extrapauta
+            mide cuánto excede el escenario a esa pauta. None = no calcular.
+        n_meses: meses de la ventana de datos (12 si es la ventana anual del
+            negocio) para el impacto mensual.
+    """
+    total_actual = float(df_sim["Consumo Ideal"].sum())
+    total_sim = float(df_sim["Consumo Simulado"].sum())
+    impacto = total_sim - total_actual
+    n_meses = max(int(n_meses), 1)
+
+    out = {
+        "total_actual": total_actual,
+        "total_simulado": total_sim,
+        "impacto": impacto,
+        "impacto_pct": (total_sim / total_actual - 1) if total_actual > 0 else 0.0,
+        "impacto_mensual": impacto / n_meses,
+    }
+
+    if pauta_pct is not None:
+        base_pauta = total_actual * (1 + pauta_pct / 100)
+        extrapauta = total_sim - base_pauta
+        out["extrapauta"] = extrapauta
+        out["extrapauta_pct"] = (total_sim / base_pauta - 1) if base_pauta > 0 else 0.0
+        out["extrapauta_mensual"] = extrapauta / n_meses
+
+    return out
 
 
 # ============================================================================

@@ -130,3 +130,34 @@ datos de la máquina** (clave por ser datos médicos sensibles → todo local):
 - ¿"La distri" = qué reporte/vista exacta en MicroStrategy?
 - Pedir a **Nati** los listados de categorías de honorarios individuales.
 - Definir con el equipo: Decisión A y Decisión B (sección 4).
+
+---
+
+## 9. 📦 Formato CRUDO real de los exports (verificado contra archivos reales)
+
+Los exports descargados de MicroStrategy **no** vienen con el contrato de columnas
+de la app; el pipeline (`load_excel_smart` + `clean_dataset`) ahora tolera el
+formato crudo automáticamente. Lo verificado con exports reales:
+
+- **Formato y encoding variables por reporte**: CSV en UTF-8 con BOM (valores) o
+  Mac OS Roman con finales de línea CR (consumo), además de xlsx. El loader
+  detecta formato por contenido y elige encoding por heurística de letras
+  españolas.
+- **Columnas en pares estilo MicroStrategy**: cada atributo sale como columna
+  nombrada + columnas `Unnamed: N` contiguas (`Prestador`/`Unnamed: 1`), con el
+  orden ID/Desc **variable según el reporte**. `normalize_mstr_columns()` los
+  mapea al contrato decidiendo por contenido.
+- **Números como texto** con coma de miles, espacios y negativos contables:
+  `"1,130 "`, `"23,653 "`, `"(5,477,196)"`. Los maneja `to_numeric_tolerante()`.
+- **`Mes Vigencia` con nombres de mes en español** (`"Mayo 2026"`): se normaliza
+  a `MM-YYYY` canónico.
+- **Fila `Total` al final** del consumo: se descarta sola (clave no numérica).
+
+**Limitaciones genuinas del export de consumo** (no resolubles por código,
+requieren decisión de producto):
+- **No trae columna `Mes`**: el período se elige al descargar y no queda en el
+  archivo. Pendiente: parámetro `--mes` en `scripts/ingest.py` o convención de
+  nombre de archivo.
+- **No trae `Convenio ID`** (la columna `Convenio` trae un flag, no el ID).
+  Pendiente: definir estrategia de merge (por `Convenio Desc`, o degradar a
+  Prestador + Prestación resolviendo la vigencia más reciente).

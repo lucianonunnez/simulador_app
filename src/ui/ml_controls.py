@@ -50,8 +50,8 @@ def render_ml_controls(prestadores_disponibles: list = None) -> dict:
         st.caption("**Modelos a aplicar**")
         usar_lgb = st.checkbox("LightGBM (recomendado)", value=True,
                                 help="Gradient boosting. Más preciso para tabular.")
-        usar_pablo = st.checkbox("Red Neuronal (Pablo corregido)", value=True,
-                                  help="Arquitectura original de Pablo, corregida sin data leakage.")
+        usar_pablo = st.checkbox("Red Neuronal", value=True,
+                                  help="Red neuronal feed-forward, corregida sin data leakage.")
 
         config["models"] = []
         if usar_lgb:

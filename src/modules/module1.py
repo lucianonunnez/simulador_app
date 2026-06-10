@@ -5,10 +5,11 @@ v0.5.2 — diseño Swiss Medical
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 from core.data_loader import get_merged_dataset, load_consumo_and_valores
-from core.simulator import apply_simulation
+from core.simulator import apply_simulation, impact_metrics, merge_match_rate
 from ui.formatters import format_currency, format_currency_full
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -29,6 +30,11 @@ def _apply_simulation_cached(
     los tabs). Cacheado por (datos + parámetros del aumento), solo se recalcula
     cuando el usuario cambia algún %, prestador o mes; los cambios de tab y
     otras interacciones reusan el resultado.
+
+    months=1 a propósito: "Cantidad CM" ya viene acumulada por mes/ventana de
+    liquidación, así que el impacto total es la suma de las filas. Validado
+    contra simulaciones reales del negocio (desvío 0.0000%); con months=12 el
+    impacto se inflaría 12x.
     """
     return apply_simulation(
         df_merged=df_scope,
@@ -126,6 +132,17 @@ def render() -> None:
 
     st.caption(f"Datos listos · **{len(df_merged):,}** registros")
 
+    # El inner join descarta en silencio el consumo sin tarifa. Si la cobertura
+    # es baja (tarifario incompleto o de otro prestador), avisar: los totales
+    # solo representan la porción con tarifa.
+    cobertura = merge_match_rate(df_consumo, df_merged)
+    if cobertura < 0.9:
+        st.warning(
+            f"Atención: solo el **{cobertura:.0%}** del consumo encontró tarifa "
+            "en Valores. Los totales representan únicamente esa porción — "
+            "verificá que el tarifario corresponda al mismo prestador y período."
+        )
+
     config = render_simulator_controls(df_merged)
 
     if config["prestador_id"] is None:
@@ -145,8 +162,21 @@ def render() -> None:
         st.warning("Sin datos para los meses seleccionados.")
         return
 
+    # ── Universo simulable ("Pauta" del proceso de negociación) ──
+    # Quedan fuera las filas sin tarifa positiva y las prestaciones excluidas
+    # manualmente (los "No pauta": débitos, ajustes, módulos especiales).
+    mask = df_scope["Valor Convenido a HOY"] > 0
+    if config["excluidas"]:
+        mask &= ~df_scope["Prestacion ID"].isin(config["excluidas"])
+    df_simulable = df_scope[mask]
+    n_fuera = len(df_scope) - len(df_simulable)
+
+    if len(df_simulable) == 0:
+        st.warning("No quedan filas simulables: todas están sin tarifa o excluidas.")
+        return
+
     df_simulated = _apply_simulation_cached(
-        df_scope,
+        df_simulable,
         config["mode"],
         config["flat_pct"],
         config["nomenclador_pcts"],
@@ -154,13 +184,35 @@ def render() -> None:
     )
 
     n_meses      = len(meses_raw) if meses_raw else "todos"
+    if meses_raw:
+        n_meses_num = len(meses_raw)
+    elif "Mes" in df_scope.columns:
+        n_meses_num = max(int(df_scope["Mes"].nunique()), 1)
+    else:
+        n_meses_num = 12
     total_ideal  = df_simulated["Consumo Ideal"].sum()
     total_sim    = df_simulated["Consumo Simulado"].sum()
     dif          = total_sim - total_ideal
     pct          = (dif / total_ideal * 100) if total_ideal > 0 else 0
 
-    st.caption(f"Período analizado: **{n_meses} mes(es)** · {len(df_simulated):,} registros")
+    detalle_excl = f" · Excluidas (No pauta / sin tarifa): **{n_fuera:,}**" if n_fuera else ""
+    st.caption(
+        f"Período analizado: **{n_meses} mes(es)** · "
+        f"{len(df_simulated):,} registros simulados{detalle_excl}"
+    )
     _render_metrics(total_ideal, total_sim, dif, pct, n_meses)
+
+    # ── Métricas de negociación (doble escenario / extrapauta, modo plano) ──
+    metrics_prop = None
+    if config["flat_pct_propuesto"] is not None and config["mode"] == "plano":
+        df_sim_prop = _apply_simulation_cached(
+            df_simulable, "plano", config["flat_pct_propuesto"], {}, {},
+        )
+        metrics_prop = impact_metrics(df_sim_prop, config["pauta_pct"], n_meses_num)
+
+    if metrics_prop is not None or config["pauta_pct"] is not None:
+        metrics_sol = impact_metrics(df_simulated, config["pauta_pct"], n_meses_num)
+        _render_negociacion(metrics_sol, metrics_prop, config, n_meses_num)
 
     with st.expander("Tabla de Negociación — Valores por Prestación", expanded=True):
         st.caption("Valor actual vs. valor ofrecido por prestación.")
@@ -195,6 +247,39 @@ def render() -> None:
 # ============================================================================
 # HELPERS PRIVADOS
 # ============================================================================
+
+def _render_negociacion(
+    metrics_sol: dict, metrics_prop: dict | None, config: dict, n_meses_num: int
+) -> None:
+    """Tabla de impactos por escenario, réplica de la cabecera del workbook
+    de negociación (Impacto %/total/mensual y Extrapauta si hay pauta)."""
+    st.markdown("##### Métricas de negociación")
+    notas = [f"Impacto mensual = total / {n_meses_num} mes(es)"]
+    if config["pauta_pct"] is not None:
+        notas.append(f"Pauta de referencia: **{config['pauta_pct']:.2f}%**")
+    st.caption(" · ".join(notas))
+
+    rows = []
+    escenarios = [(f"Solicitado ({config['flat_pct']:.1f}%)", metrics_sol)]
+    if metrics_prop is not None:
+        escenarios.append(
+            (f"Propuesto ({config['flat_pct_propuesto']:.1f}%)", metrics_prop)
+        )
+    for nombre, m in escenarios:
+        row = {
+            "Escenario": nombre,
+            "Impacto %": f"{m['impacto_pct'] * 100:.2f}%",
+            "Impacto total": format_currency_full(m["impacto"]),
+            "Impacto mensual": format_currency_full(m["impacto_mensual"]),
+        }
+        if "extrapauta" in m:
+            row["Extrapauta %"] = f"{m['extrapauta_pct'] * 100:.2f}%"
+            row["Extrapauta total"] = format_currency_full(m["extrapauta"])
+            row["Extrapauta mensual"] = format_currency_full(m["extrapauta_mensual"])
+        rows.append(row)
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
     st.info("**Esperando datos** — Subí los archivos desde el sidebar.")
