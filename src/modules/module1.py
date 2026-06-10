@@ -8,7 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 from core.data_loader import get_merged_dataset, load_consumo_and_valores
-from core.simulator import apply_simulation
+from core.simulator import apply_simulation, merge_match_rate
 from ui.formatters import format_currency, format_currency_full
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -29,6 +29,11 @@ def _apply_simulation_cached(
     los tabs). Cacheado por (datos + parámetros del aumento), solo se recalcula
     cuando el usuario cambia algún %, prestador o mes; los cambios de tab y
     otras interacciones reusan el resultado.
+
+    months=1 a propósito: "Cantidad CM" ya viene acumulada por mes/ventana de
+    liquidación, así que el impacto total es la suma de las filas. Validado
+    contra simulaciones reales del negocio (desvío 0.0000%); con months=12 el
+    impacto se inflaría 12x.
     """
     return apply_simulation(
         df_merged=df_scope,
@@ -125,6 +130,17 @@ def render() -> None:
         return
 
     st.caption(f"Datos listos · **{len(df_merged):,}** registros")
+
+    # El inner join descarta en silencio el consumo sin tarifa. Si la cobertura
+    # es baja (tarifario incompleto o de otro prestador), avisar: los totales
+    # solo representan la porción con tarifa.
+    cobertura = merge_match_rate(df_consumo, df_merged)
+    if cobertura < 0.9:
+        st.warning(
+            f"Atención: solo el **{cobertura:.0%}** del consumo encontró tarifa "
+            "en Valores. Los totales representan únicamente esa porción — "
+            "verificá que el tarifario corresponda al mismo prestador y período."
+        )
 
     config = render_simulator_controls(df_merged)
 

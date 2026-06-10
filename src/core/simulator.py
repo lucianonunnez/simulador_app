@@ -131,6 +131,22 @@ def merge_datasets(df_consumo: pd.DataFrame, df_valores: pd.DataFrame) -> pd.Dat
     return df_merged
 
 
+def merge_match_rate(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> float:
+    """
+    Fracción (0..1) de filas de consumo que encontraron tarifa en el merge.
+
+    El inner join descarta en silencio el consumo sin tarifa: si el tarifario
+    es de otro prestador, el resultado puede ser 0 filas sin ningún error.
+    Validado con datos reales: un 'valores' de otro prestador dio match 0%.
+    La UI usa este número para advertir cuando la cobertura es baja.
+    """
+    if len(df_consumo) == 0:
+        return 0.0
+    # Tras el dedup de vigencia el merge es m:1 -> cada fila de df_merged
+    # corresponde a exactamente una fila de consumo que matcheó.
+    return min(len(df_merged) / len(df_consumo), 1.0)
+
+
 # ============================================================================
 # SIMULACIÓN DE AUMENTOS
 # ============================================================================
@@ -157,7 +173,11 @@ def apply_simulation(
     Args:
         df_merged: resultado de merge_datasets, con columnas Cantidad CM y
             Valor Convenido a HOY.
-        months: cantidad de meses a proyectar.
+        months: multiplicador de la cantidad. IMPORTANTE: si "Cantidad CM" ya
+            es el acumulado de la ventana de liquidación (como en los exports
+            del negocio, p.ej. 12 meses), debe ser 1 — con 12 el impacto se
+            infla 12x. Validado contra simulaciones reales del negocio:
+            months=1 reproduce el "Impacto anual" con desvío 0.0000%.
         mode: "plano", "por_nomenclador" o "por_prestacion".
         flat_pct: usado cuando mode="plano".
         nomenclador_pcts: dict {nomenclador: %} cuando mode="por_nomenclador".

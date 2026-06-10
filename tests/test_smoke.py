@@ -23,7 +23,7 @@ from core.excel_utils import (
     to_numeric_tolerante,
 )
 from core.ml_predictor import _is_usable_model_file
-from core.simulator import apply_simulation, merge_datasets
+from core.simulator import apply_simulation, merge_datasets, merge_match_rate
 from ui.formatters import format_currency, format_currency_full, format_quantity
 
 
@@ -79,6 +79,26 @@ def test_apply_simulation_aumento_plano():
 # ----------------------------------------------------------------------------
 # core.anomaly
 # ----------------------------------------------------------------------------
+def test_merge_match_rate_detecta_tarifario_ajeno():
+    """Un tarifario de OTRO prestador da merge vacío: el match-rate debe ser 0
+    (validado con exports reales, donde fallaba en silencio)."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1130, 1130], "Convenio ID": [1, 1],
+        "Prestacion ID": [10, 20], "Cantidad CM": [5, 3],
+    })
+    valores_ajeno = pd.DataFrame({
+        "Prestador ID": [99785], "Convenio ID": [1],
+        "Prestacion ID": [10], "Valor Convenido a HOY": [100.0],
+    })
+    merged = merge_datasets(consumo, valores_ajeno)
+    assert merge_match_rate(consumo, merged) == 0.0
+
+    # Cobertura parcial: solo una de dos prestaciones tiene tarifa
+    valores_propio = valores_ajeno.assign(**{"Prestador ID": [1130]})
+    merged = merge_datasets(consumo, valores_propio)
+    assert merge_match_rate(consumo, merged) == pytest.approx(0.5)
+
+
 def test_compute_metric_precio_unitario_evita_division_por_cero():
     df = pd.DataFrame({"Importe CM": [100.0, 50.0], "Cantidad CM": [4, 0]})
     precio = compute_metric(df, "precio_unitario")
