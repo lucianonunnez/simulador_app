@@ -318,6 +318,11 @@ def clean_dataset(
       que el upsert y los filtros sean consistentes (evita duplicar períodos).
     - Descarta las filas sin clave válida (key_col NaN): elimina justamente esas
       filas de Total/Subtotal de los exports de MicroStrategy.
+    - Descarta filas EXACTAMENTE duplicadas: los exports son agregados
+      (una fila por combinación de atributos), así que una fila idéntica
+      repetida es un duplicado real, no dos eventos distintos. Entre archivos
+      no hace falta: el upsert por (Prestador, Mes) ya reemplaza en vez de
+      acumular.
     - Deja los IDs como enteros nullable (sin el ".0" de los floats).
     """
     df = df.copy()
@@ -332,6 +337,8 @@ def clean_dataset(
 
     if key_col in df.columns:
         df = df[df[key_col].notna()].reset_index(drop=True)
+
+    df = df.drop_duplicates().reset_index(drop=True)
 
     for col in (numeric_cols & _ID_COLS):
         if col in df.columns:

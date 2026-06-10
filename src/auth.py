@@ -88,6 +88,12 @@ def require_login() -> None:
     # Guardamos el authenticator en session_state para poder usar el logout
     st.session_state["_authenticator"] = authenticator
 
+    # Encabezado de marca sobre el formulario (solo mientras no hay sesión).
+    if st.session_state.get("authentication_status") is not True:
+        from ui.styles import brand_header_login
+
+        st.markdown(brand_header_login(), unsafe_allow_html=True)
+
     # Lockout anti fuerza bruta: si hubo demasiados intentos fallidos
     # recientes, frenar ANTES de procesar credenciales.
     restante = ratelimit.segundos_bloqueado(_clave_ratelimit())

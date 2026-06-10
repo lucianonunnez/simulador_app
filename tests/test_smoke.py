@@ -377,6 +377,20 @@ def test_load_excel_smart_csv_mac_roman_con_cr():
     assert df.loc[0, "Prestador Desc"] == "Clínica Ñandú"   # acentos correctos
 
 
+def test_clean_dataset_descarta_filas_duplicadas_exactas():
+    """Anti-duplicados a nivel fila: una fila idéntica repetida dentro del
+    archivo es un duplicado real (los exports son agregados) y se descarta."""
+    df = pd.DataFrame({
+        "Prestador ID": [1130, 1130, 1130],
+        "Mes": ["01-2025", "01-2025", "01-2025"],
+        "Prestacion ID": [100, 100, 200],     # las dos primeras son idénticas
+        "Cantidad CM": [5, 5, 3],
+    })
+    out = clean_dataset(df, CONSUMO_NUMERIC_COLS)
+    assert len(out) == 2
+    assert out["Prestacion ID"].tolist() == [100, 200]
+
+
 def test_clean_dataset_ids_con_coma_de_miles_no_pierden_filas():
     """Regresión: 'Prestador ID' = '1,130 ' como texto no debe volverse NaN
     (antes to_numeric directo lo descartaba junto con toda la fila)."""

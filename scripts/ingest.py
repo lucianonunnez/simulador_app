@@ -182,12 +182,12 @@ def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
         print(f"  ! {path.name}: faltan columnas {sorted(miss)} — saltando")
         return 0, False
 
-    # Limpia filas de Total/Subtotal y tipa las columnas numéricas.
+    # Limpia filas de Total/Subtotal, duplicados exactos y tipa las numéricas.
     filas_antes = len(df)
     df = xu.clean_dataset(df, ds["numeric"])
     descartadas = filas_antes - len(df)
     if descartadas:
-        print(f"    ({descartadas} fila(s) de total/sin clave descartadas)")
+        print(f"    ({descartadas} fila(s) de total/sin clave/duplicadas descartadas)")
 
     con.execute("BEGIN")
     try:
