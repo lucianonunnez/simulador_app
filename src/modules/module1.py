@@ -14,7 +14,7 @@ from core.data_loader import (
     get_prestadores_disponibles,
     load_consumo_and_valores,
 )
-from core.simulator import apply_simulation, impact_metrics, merge_match_rate
+from core.simulator import apply_simulation, impact_metrics, merge_coverage
 from ui.formatters import format_currency, format_currency_full, format_int
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -176,15 +176,23 @@ def render() -> None:
 
     st.caption(f"Datos listos · **{format_int(len(df_merged))}** registros")
 
-    # El inner join descarta en silencio el consumo sin tarifa. Si la cobertura
-    # es baja (tarifario incompleto o de otro prestador), avisar: los totales
-    # solo representan la porción con tarifa.
-    cobertura = merge_match_rate(df_consumo, df_merged)
-    if cobertura < 0.9:
+    # El inner join descarta en silencio el consumo sin tarifa. La cobertura
+    # se mide por filas Y por importe: en la base real el 2% de filas sin
+    # tarifa concentraba el 27% del dinero (Medicamentos / "No Asignado" —
+    # el universo "No pauta" del negocio), y la métrica por filas lo ocultaba.
+    cob = merge_coverage(df_consumo, df_merged)
+    if cob["filas"] < 0.9 or (cob["importe"] is not None and cob["importe"] < 0.95):
+        detalle_importe = ""
+        if cob["importe"] is not None:
+            detalle_importe = (
+                f" y el **{cob['importe']:.0%} del importe** "
+                f"({format_currency(cob['importe_sin_tarifa'])} quedan FUERA de la simulación — "
+                "típicamente Medicamentos / 'No Asignado', el universo No pauta)"
+            )
         st.warning(
-            f"Atención: solo el **{cobertura:.0%}** del consumo encontró tarifa "
-            "en Valores. Los totales representan únicamente esa porción — "
-            "verificá que el tarifario corresponda al mismo prestador y período."
+            f"Cobertura de tarifas: el **{cob['filas']:.0%}** de las filas de consumo "
+            f"encontró tarifa{detalle_importe}. Los totales representan solo la "
+            "porción con tarifa — revisá el tarifario si esperabas cobertura completa."
         )
 
     config = render_simulator_controls(df_merged, prestadores=catalogo)

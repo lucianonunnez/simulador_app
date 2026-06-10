@@ -81,7 +81,15 @@ def _dedup_vigencia(df_valores: pd.DataFrame, keys: list[str] | None = None) -> 
         return df_valores
 
     tmp = df_valores.copy()
-    tmp["_vig_dt"] = pd.to_datetime(tmp[VALORES_MES_COL], format="%m-%Y", errors="coerce")
+    # Parser único de meses: la base real tiene vigencias viejas como texto en
+    # español ("Septiembre 2024") ingeridas antes de la normalización — con el
+    # formato fijo caían a NaT y la "vigencia más reciente" quedaba arbitraria
+    # (hallazgo de la auditoría sobre la base real: 80% de las vigencias).
+    from core.excel_utils import normalize_month_series
+
+    tmp["_vig_dt"] = pd.to_datetime(
+        normalize_month_series(tmp[VALORES_MES_COL]), format="%m-%Y", errors="coerce"
+    )
     tmp = (
         tmp.sort_values("_vig_dt", na_position="first")
         .drop_duplicates(subset=keys, keep="last")
@@ -158,6 +166,34 @@ def merge_match_rate(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> float
     # Tras el dedup de vigencia el merge es m:1 -> cada fila de df_merged
     # corresponde a exactamente una fila de consumo que matcheó.
     return min(len(df_merged) / len(df_consumo), 1.0)
+
+
+def merge_coverage(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> dict:
+    """
+    Cobertura del merge por FILAS y por IMPORTE.
+
+    Hallazgo de la auditoría sobre la base real: la cobertura por filas era
+    97,9% pero por dinero solo 73% — el 2% de filas sin tarifa concentraba el
+    27% del importe (Medicamentos, "No Asignado": el universo "No pauta" del
+    negocio). Medir solo filas enmascara cuánta plata queda fuera de la
+    simulación; la UI debe mostrar ambas.
+
+    Returns:
+        {"filas": 0..1, "importe": 0..1 | None, "importe_sin_tarifa": $ | None}
+        (las claves de importe son None si no hay columna "Importe CM").
+    """
+    out = {
+        "filas": merge_match_rate(df_consumo, df_merged),
+        "importe": None,
+        "importe_sin_tarifa": None,
+    }
+    if "Importe CM" in df_consumo.columns and "Importe CM" in df_merged.columns:
+        total = float(pd.to_numeric(df_consumo["Importe CM"], errors="coerce").sum())
+        con_tarifa = float(pd.to_numeric(df_merged["Importe CM"], errors="coerce").sum())
+        if total > 0:
+            out["importe"] = min(con_tarifa / total, 1.0)
+            out["importe_sin_tarifa"] = max(total - con_tarifa, 0.0)
+    return out
 
 
 # ============================================================================

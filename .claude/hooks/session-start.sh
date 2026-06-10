@@ -17,7 +17,7 @@ echo "[session-start] Instalando dependencias de la app (requirements.txt)..."
 pip install --quiet --no-cache-dir -r requirements.txt
 
 echo "[session-start] Instalando herramientas de desarrollo (ruff, pytest)..."
-pip install --quiet --no-cache-dir ruff pytest
+pip install --quiet --no-cache-dir -r requirements-dev.txt
 
 # El código importa como `from core...`, `from modules...`, `from ui...`,
 # resolviendo contra src/. Persistimos PYTHONPATH para tests y linters.

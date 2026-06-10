@@ -1,0 +1,7 @@
+# Herramientas de desarrollo (lint + tests). No se instalan en producción.
+# Hallazgo de auditoría: ruff/pytest no estaban declarados -> un checkout
+# limpio no podía correr los checks del proyecto.
+#
+#   pip install -r requirements-dev.txt
+ruff>=0.5
+pytest>=8.0

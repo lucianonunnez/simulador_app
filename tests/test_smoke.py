@@ -31,6 +31,7 @@ from core.ml_predictor import _is_usable_model_file
 from core.simulator import (
     apply_simulation,
     impact_metrics,
+    merge_coverage,
     merge_datasets,
     merge_match_rate,
 )
@@ -179,6 +180,44 @@ def test_merge_match_rate_detecta_tarifario_ajeno():
     valores_propio = valores_ajeno.assign(**{"Prestador ID": [1130]})
     merged = merge_datasets(consumo, valores_propio)
     assert merge_match_rate(consumo, merged) == pytest.approx(0.5)
+
+
+def test_merge_coverage_por_importe_no_se_enmascara():
+    """Hallazgo de la base real: 98% de filas con tarifa pero solo 73% del
+    dinero. La cobertura por importe debe revelar lo que la de filas oculta."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1, 1], "Convenio ID": [1, 1],
+        "Prestacion ID": [10, 20], "Cantidad CM": [5, 1],
+        "Importe CM": [100.0, 900.0],          # la fila SIN tarifa concentra el 90%
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1], "Convenio ID": [1],
+        "Prestacion ID": [10], "Valor Convenido a HOY": [20.0],
+    })
+    merged = merge_datasets(consumo, valores)
+    cob = merge_coverage(consumo, merged)
+    assert cob["filas"] == pytest.approx(0.5)          # 1 de 2 filas
+    assert cob["importe"] == pytest.approx(0.1)        # pero solo 10% de la plata
+    assert cob["importe_sin_tarifa"] == pytest.approx(900.0)
+
+
+def test_dedup_vigencia_con_meses_en_espanol():
+    """Hallazgo de la base real: 80% de las vigencias son texto en español
+    ("Septiembre 2024") y caían a NaT -> la 'vigencia más reciente' quedaba
+    arbitraria. El dedup debe resolverlas con el parser único."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1], "Convenio ID": [1],
+        "Prestacion ID": [10], "Cantidad CM": [2],
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1, 1, 1], "Convenio ID": [1, 1, 1],
+        "Prestacion ID": [10, 10, 10],
+        "Mes Vigencia": ["Abril 2011", "Septiembre 2024", "Enero 2020"],
+        "Valor Convenido a HOY": [10.0, 99.0, 50.0],
+    })
+    merged = merge_datasets(consumo, valores)
+    assert len(merged) == 1
+    assert merged.loc[0, "Valor Convenido a HOY"] == 99.0   # Septiembre 2024 gana
 
 
 def test_compute_metric_precio_unitario_evita_division_por_cero():
