@@ -90,49 +90,58 @@ def _dedup_vigencia(df_valores: pd.DataFrame, keys: list[str] | None = None) -> 
     return tmp
 
 
-def _merge_keys_disponibles(
-    df_consumo: pd.DataFrame, df_valores: pd.DataFrame
-) -> list[str]:
-    """
-    Claves de merge utilizables según lo que traen los datos.
-
-    El export CRUDO de consumo no trae 'Convenio ID' (la columna 'Convenio'
-    es un flag). En ese caso el merge se degrada a Prestador + Prestación,
-    igual que el proceso real del negocio (que resuelve la tarifa por
-    prestación con la vigencia más reciente).
-    """
-    keys = list(MERGE_KEYS)
-    for df in (df_consumo, df_valores):
-        if "Convenio ID" not in df.columns or df["Convenio ID"].isna().all():
-            return [k for k in keys if k != "Convenio ID"]
-    return keys
-
-
-def merge_datasets(df_consumo: pd.DataFrame, df_valores: pd.DataFrame) -> pd.DataFrame:
-    """
-    Une consumo con valores usando Prestador + Convenio + Prestación
-    (o Prestador + Prestación si 'Convenio ID' no viene en los datos).
-
-    Cada fila de consumo se enriquece con el "Valor Convenido a HOY" del tarifario.
-    Se deduplica el tarifario a una vigencia por clave para evitar doble conteo.
-    """
-    keys = _merge_keys_disponibles(df_consumo, df_valores)
-    df_valores = _dedup_vigencia(df_valores, keys)
-
-    df_merged = pd.merge(
+def _merge_una_pasada(
+    df_consumo: pd.DataFrame, df_valores: pd.DataFrame, keys: list[str]
+) -> pd.DataFrame:
+    """Merge inner con el tarifario deduplicado a una vigencia por clave."""
+    v = _dedup_vigencia(df_valores, keys)
+    return pd.merge(
         df_consumo,
-        df_valores,
+        v,
         on=keys,
         how="inner",
         suffixes=("", "_val"),
         validate="m:1",  # cada clave del tarifario es única tras el dedup
     )
 
-    # Nota: el viejo fallback de "clave concatenada" se eliminó — tras
-    # normalize_dataframes ambos lados ya son Int64, así que stringificar las
-    # mismas claves daba el mismo resultado (era un no-op). Un merge vacío o
-    # parcial se reporta vía merge_match_rate() en la UI.
-    return df_merged
+
+def merge_datasets(df_consumo: pd.DataFrame, df_valores: pd.DataFrame) -> pd.DataFrame:
+    """
+    Une consumo con valores usando Prestador + Convenio + Prestación,
+    degradando a Prestador + Prestación para las filas sin 'Convenio ID'
+    (el export CRUDO de consumo no lo trae).
+
+    Soporta datos MIXTOS: cuando la tabla de consumo junta archivos curados
+    (con Convenio ID) y exports crudos (Convenio ID NULL), el merge se hace en
+    dos pasadas — 3 claves para las filas con convenio, 2 para las que no —
+    así las filas crudas no quedan sin tarifa en silencio. En la pasada de 2
+    claves, el Convenio ID se completa desde el tarifario matcheado.
+
+    Cada fila de consumo se enriquece con el "Valor Convenido a HOY" del
+    tarifario, resolviendo la vigencia más reciente por clave (sin doble
+    conteo). Un merge vacío o parcial se reporta vía merge_match_rate().
+    """
+    keys2 = [k for k in MERGE_KEYS if k != "Convenio ID"]
+
+    def _tiene_convenio(df: pd.DataFrame) -> bool:
+        return "Convenio ID" in df.columns and df["Convenio ID"].notna().any()
+
+    # Si algún lado no trae convenio en absoluto -> 2 claves para todo.
+    if not (_tiene_convenio(df_consumo) and _tiene_convenio(df_valores)):
+        return _merge_una_pasada(df_consumo, df_valores, keys2)
+
+    sin_convenio = df_consumo["Convenio ID"].isna()
+    if not sin_convenio.any():
+        return _merge_una_pasada(df_consumo, df_valores, list(MERGE_KEYS))
+
+    # Datos mixtos: dos pasadas.
+    m1 = _merge_una_pasada(df_consumo[~sin_convenio], df_valores, list(MERGE_KEYS))
+    m2 = _merge_una_pasada(df_consumo[sin_convenio], df_valores, keys2)
+    if "Convenio ID_val" in m2.columns:
+        # Enriquecer las filas crudas con el convenio del tarifario matcheado.
+        m2["Convenio ID"] = m2["Convenio ID_val"]
+        m2 = m2.drop(columns=["Convenio ID_val"])
+    return pd.concat([m1, m2], ignore_index=True)
 
 
 def merge_match_rate(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> float:

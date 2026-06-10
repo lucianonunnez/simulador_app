@@ -114,6 +114,31 @@ def test_merge_degrada_a_dos_claves_sin_convenio_id():
     assert merged.loc[0, "Valor Convenido a HOY"] == 90.0    # vigencia más reciente
 
 
+def test_merge_mixto_xlsx_curado_mas_export_crudo():
+    """El caso real del usuario: la tabla de consumo junta archivos curados
+    (con Convenio ID) y exports crudos (Convenio ID NULL). Ambos tipos de fila
+    deben encontrar tarifa (dos pasadas), sin fan-out, y la fila cruda hereda
+    el convenio del tarifario."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1130, 1130],
+        "Convenio ID": [7, pd.NA],          # curada / cruda
+        "Prestacion ID": [100, 100],
+        "Cantidad CM": [3, 5],
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1130, 1130],
+        "Convenio ID": [7, 7],
+        "Prestacion ID": [100, 100],
+        "Mes Vigencia": ["01-2025", "06-2025"],
+        "Valor Convenido a HOY": [80.0, 90.0],
+    })
+    merged = merge_datasets(consumo, valores)
+    assert len(merged) == 2                                   # ambas filas con tarifa
+    assert (merged["Valor Convenido a HOY"] == 90.0).all()    # vigencia más reciente
+    assert merged["Convenio ID"].notna().all()                # la cruda heredó el convenio
+    assert "Convenio ID_val" not in merged.columns
+
+
 def test_impact_metrics_formulas_del_workbook():
     """Réplica de la cabecera del workbook de negociación: con aumento plano,
     Impacto % == % aplicado, mensual = total / n_meses, y Extrapauta mide el
