@@ -21,6 +21,7 @@ from core.ml_predictor import (
     predecir_pablo,
 )
 from ui.formatters import format_currency, format_quantity, safe_pct
+from ui.insights import insight_prediccion
 from ui.theme import (
     COLOR_PRINCIPAL,
     COLOR_SECUNDARIO,
@@ -148,6 +149,10 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
     layout["yaxis"]["title"] = dict(text=METRIC_LABEL[config["metric"]])
     fig.update_layout(**layout)
     st.plotly_chart(fig, use_container_width=True)
+
+    texto = insight_prediccion(ts["real"].tolist(), ts["prediccion"].tolist())
+    if texto:
+        st.caption(texto)
 
     # --- Tabla de detalle ---
     with st.expander("Ver detalle por mes"):

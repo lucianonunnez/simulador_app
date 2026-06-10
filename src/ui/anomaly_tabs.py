@@ -21,6 +21,7 @@ from core.anomaly import (
     detect_temporal_anomalies,
 )
 from ui.formatters import format_currency, format_currency_full, format_quantity, safe_pct
+from ui.insights import insight_anomalias
 
 
 # ============================================================================
@@ -417,6 +418,12 @@ def _render_temporal_view(
         paper_bgcolor="#F8F9FA",
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    desvios = [
+        safe_pct(v - m, m)
+        for v, m in zip(anomalies["valor"], anomalies["media_movil"])
+    ]
+    st.caption(insight_anomalias(anomalies["Mes"].tolist(), desvios))
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Meses analizados", len(ts_agg))

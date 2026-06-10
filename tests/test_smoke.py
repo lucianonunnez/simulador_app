@@ -460,3 +460,61 @@ def test_is_usable_model_file_detecta_puntero_lfs(tmp_path):
     assert _is_usable_model_file(pointer) is False
     assert _is_usable_model_file(real) is True
     assert _is_usable_model_file(missing) is False
+
+
+# ----------------------------------------------------------------------------
+# ui.insights — el "qué mirar" de los gráficos
+# ----------------------------------------------------------------------------
+def test_insight_evolucion_marca_el_pico():
+    from ui.insights import insight_evolucion
+    res = insight_evolucion(["Ene", "Feb", "Mar"], [10.0, 50.0, 20.0], fmt=str)
+    assert res is not None
+    i_pico, texto = res
+    assert i_pico == 1
+    assert "Feb" in texto and "pico" in texto.lower()
+
+
+def test_insight_concentracion():
+    from ui.insights import insight_concentracion
+    texto = insight_concentracion(["A", "B", "C", "D"], [70, 20, 5, 5], top_n=2)
+    assert "A, B" in texto and "90%" in texto
+    assert insight_concentracion([], []) is None
+
+
+def test_insight_anomalias_y_prediccion():
+    from ui.insights import insight_anomalias, insight_prediccion
+    assert "dentro de lo esperado" in insight_anomalias([], [])
+    texto = insight_anomalias(["05-2025", "08-2025"], [12.0, -40.0])
+    assert "2 mes(es)" in texto and "08-2025" in texto and "-40%" in texto
+    texto = insight_prediccion([100, 100], [110, 112])    # sobreestima ~11%
+    assert "sobreestimar" in texto
+
+
+def test_normalize_mstr_columns_muestra_sesgada():
+    """Regresión del export real: las primeras filas del archivo traían códigos
+    de texto (Internación) y el muestreo de 200 filas no detectaba que la
+    columna era 98% numérica en total -> no mapeaba Prestacion ID."""
+    n = 300
+    # Primeras 250 filas con código de texto, las otras 50 numéricas:
+    codigos = ["Mat.descar"] * 20 + ["43210305"] * 280
+    df = pd.DataFrame({
+        "Prestador": ["1128"] * n,
+        "Unnamed: 1": ["ICBA Ficticio"] * n,
+        "Prestacion": ["Práctica de prueba"] * n,
+        "Unnamed: 3": codigos[:n],
+        "Cantidad CM": ["1"] * n,
+    })
+    out = normalize_mstr_columns(df)
+    assert "Prestacion ID" in out.columns      # 93% numérico en el total
+    assert "Prestacion Desc" in out.columns
+
+
+def test_normalize_mstr_columns_columna_de_ceros_no_es_id():
+    """Una columna de puros ceros (flag/placeholder) no debe mapearse como ID."""
+    df = pd.DataFrame({
+        "Convenio": [0, 0, 0, 0],
+        "Unnamed: 1": ["Convenio Ficticio A", "Convenio Ficticio B"] * 2,
+    })
+    out = normalize_mstr_columns(df)
+    assert "Convenio ID" not in out.columns
+    assert "Convenio Desc" in out.columns

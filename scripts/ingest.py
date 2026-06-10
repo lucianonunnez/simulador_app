@@ -228,6 +228,9 @@ def main() -> int:
                     help="Borra y reconstruye la base desde cero")
     ap.add_argument("--status", action="store_true",
                     help="Solo muestra qué hay cargado y sale")
+    ap.add_argument("--solo", metavar="ARCHIVO", default=None,
+                    help="Procesa únicamente el archivo con ese nombre exacto "
+                         "(permite asignar --mes distinto por archivo)")
     ap.add_argument("--archivar", action="store_true",
                     help="Mueve los archivos procesados OK a data/raw/<tipo>/procesados/ "
                          "para que la carpeta de entrada no acumule archivos viejos")
@@ -273,6 +276,8 @@ def main() -> int:
         # Los exports de MicroStrategy vienen como xlsx o CSV (encoding variable);
         # load_excel_smart detecta el formato por contenido.
         files = sorted([*ds["dir"].glob("*.xlsx"), *ds["dir"].glob("*.csv")])
+        if args.solo:
+            files = [p for p in files if p.name == args.solo]
         print(f"[{tipo}] {len(files)} archivo(s) en {ds['dir']}")
         for path in files:
             filas, ok = _process_file(con, tipo, ds, path, args.rebuild, args.mes)
