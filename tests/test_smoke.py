@@ -26,7 +26,12 @@ from core.excel_utils import (
     to_numeric_tolerante,
 )
 from core.ml_predictor import _is_usable_model_file
-from core.simulator import apply_simulation, merge_datasets, merge_match_rate
+from core.simulator import (
+    apply_simulation,
+    impact_metrics,
+    merge_datasets,
+    merge_match_rate,
+)
 from ui.formatters import format_currency, format_currency_full, format_quantity
 
 
@@ -82,6 +87,48 @@ def test_apply_simulation_aumento_plano():
 # ----------------------------------------------------------------------------
 # core.anomaly
 # ----------------------------------------------------------------------------
+def test_merge_degrada_a_dos_claves_sin_convenio_id():
+    """El export crudo de consumo no trae 'Convenio ID': el merge debe degradar
+    a Prestador + Prestación, resolviendo la vigencia más reciente (sin fan-out
+    aunque el tarifario tenga la misma prestación en dos convenios)."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1130], "Convenio ID": [pd.NA],
+        "Prestacion ID": [100], "Cantidad CM": [10],
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1130, 1130],
+        "Convenio ID": [1, 2],            # misma prestación en dos convenios
+        "Prestacion ID": [100, 100],
+        "Mes Vigencia": ["01-2025", "06-2025"],
+        "Valor Convenido a HOY": [80.0, 90.0],
+    })
+    merged = merge_datasets(consumo, valores)
+    assert len(merged) == 1                                  # sin fan-out
+    assert merged.loc[0, "Valor Convenido a HOY"] == 90.0    # vigencia más reciente
+
+
+def test_impact_metrics_formulas_del_workbook():
+    """Réplica de la cabecera del workbook de negociación: con aumento plano,
+    Impacto % == % aplicado, mensual = total / n_meses, y Extrapauta mide el
+    exceso sobre la pauta de referencia."""
+    df = pd.DataFrame({
+        "Prestador ID": [1, 1], "Convenio ID": [1, 1], "Prestacion ID": [10, 20],
+        "Nomenclador": ["A", "A"], "Cantidad CM": [10, 5],
+        "Valor Convenido a HOY": [100.0, 200.0],
+    })
+    sim = apply_simulation(df, months=1, mode="plano", flat_pct=2.9)
+    m = impact_metrics(sim, pauta_pct=2.2, n_meses=12)
+
+    # Σ Ideal = 10*100 + 5*200 = 2000
+    assert m["total_actual"] == pytest.approx(2000.0)
+    assert m["impacto_pct"] == pytest.approx(0.029)              # = % aplicado
+    assert m["impacto"] == pytest.approx(2000 * 0.029)           # 58.0
+    assert m["impacto_mensual"] == pytest.approx(m["impacto"] / 12)
+    # Extrapauta = Σ Sim − Σ Ideal × (1 + pauta) = 2058 − 2044 = 14
+    assert m["extrapauta"] == pytest.approx(2058.0 - 2044.0)
+    assert m["extrapauta_pct"] == pytest.approx(2058.0 / 2044.0 - 1)
+
+
 def test_merge_match_rate_detecta_tarifario_ajeno():
     """Un tarifario de OTRO prestador da merge vacío: el match-rate debe ser 0
     (validado con exports reales, donde fallaba en silencio)."""

@@ -82,9 +82,12 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
     df_scope = df_merged if config["prestador_id"] is None \
                else df_merged[df_merged["Prestador ID"] == config["prestador_id"]]
 
-    config["flat_pct"]         = 0.0
-    config["nomenclador_pcts"] = {}
-    config["prestacion_pcts"]  = {}
+    config["flat_pct"]           = 0.0
+    config["flat_pct_propuesto"] = None
+    config["pauta_pct"]          = None
+    config["nomenclador_pcts"]   = {}
+    config["prestacion_pcts"]    = {}
+    config["excluidas"]          = []
 
     # ── Expander: Definir Aumentos ──
     with st.expander("Definir Aumentos", expanded=True):
@@ -92,9 +95,36 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
         # ------------------------------------------------------------------ PLANO
         if config["mode"] == "plano":
             config["flat_pct"] = st.number_input(
-                "Aumento Global (%)", min_value=-100.0, max_value=500.0,
+                "Aumento Solicitado (%)", min_value=-100.0, max_value=500.0,
                 value=15.0, step=0.5, key="sim_flat_pct",
+                help="Escenario principal: el % de aumento pedido.",
             )
+
+            c_prop, c_pauta = st.columns(2)
+            with c_prop:
+                usar_prop = st.checkbox(
+                    "Comparar con escenario Propuesto",
+                    key="sim_usar_prop",
+                    help="Simula además un segundo % (la contraoferta) y "
+                         "muestra ambos impactos lado a lado.",
+                )
+                if usar_prop:
+                    config["flat_pct_propuesto"] = st.number_input(
+                        "Aumento Propuesto (%)", min_value=-100.0, max_value=500.0,
+                        value=10.0, step=0.5, key="sim_prop_pct",
+                    )
+            with c_pauta:
+                usar_pauta = st.checkbox(
+                    "Pauta de referencia (Extrapauta)",
+                    key="sim_usar_pauta",
+                    help="% autorizado de referencia. El Extrapauta mide cuánto "
+                         "excede cada escenario a esa pauta.",
+                )
+                if usar_pauta:
+                    config["pauta_pct"] = st.number_input(
+                        "Pauta (%)", min_value=-100.0, max_value=500.0,
+                        value=2.0, step=0.1, key="sim_pauta_pct",
+                    )
 
         # -------------------------------------------------------- POR NOMENCLADOR
         elif config["mode"] == "por_nomenclador":
@@ -187,5 +217,36 @@ def render_simulator_controls(df_merged: pd.DataFrame) -> dict:
                             label_visibility="collapsed",
                         )
                         config["prestacion_pcts"][pid] = pct
+
+    # ── Expander: Exclusiones (No pauta) ──
+    with st.expander("Exclusiones — No pauta", expanded=False):
+        st.caption(
+            "Prestaciones que quedan **fuera** de la simulación (el 'No pauta' "
+            "del proceso de negociación: débitos, ajustes, módulos especiales, "
+            "etc.). Las filas sin tarifa positiva se excluyen automáticamente."
+        )
+        prests_excl = (
+            df_scope[["Prestacion ID", "Prestacion Desc"]]
+            .drop_duplicates()
+            .sort_values("Prestacion Desc")
+        )
+        prests_excl = prests_excl[prests_excl["Prestacion ID"].notna()]
+        prests_excl["label"] = (
+            prests_excl["Prestacion ID"].astype(str) + " — " + prests_excl["Prestacion Desc"].astype(str)
+        )
+        seleccion_excl = st.multiselect(
+            "Prestaciones a excluir",
+            options=prests_excl["label"].tolist(),
+            default=[],
+            placeholder="Escribí para buscar prestaciones a excluir...",
+            key="sim_excluidas",
+        )
+        excluidas = []
+        for label in seleccion_excl:
+            try:
+                excluidas.append(int(label.split(" — ")[0]))
+            except ValueError:
+                continue
+        config["excluidas"] = excluidas
 
     return config
