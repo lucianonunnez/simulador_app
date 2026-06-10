@@ -296,7 +296,8 @@ def predecir_pablo(
     if len(df_feat) == 0:
         return pd.DataFrame()
 
-    # Pablo usa one-hot de categóricas (como en el notebook)
+    # La red usa one-hot de categóricas (según el entrenamiento corregido de
+    # Colab; el notebook original descartaba las categóricas por completo)
     cats = [c for c in ["Nomenclador", "Tipo Clase CM", "Gama"] if c in df_feat.columns]
     num = [c for c in df_feat.columns if c not in cats + ["Prestador ID", "Prestacion ID", "mes_dt", "valor"]]
 

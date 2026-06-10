@@ -299,10 +299,10 @@ def _tab_pablo_original() -> None:
         Dense(3, activation='relu'),    # Capa oculta 2
         Dense(1),                       # Capa de salida (lineal)
     ])
-    model.compile(optimizer='adam', loss='mae')
+    model.compile(optimizer='adam', loss='mae', metrics=['mae', 'mse'])
 
     # Entrenamiento
-    early_stop = EarlyStopping(patience=15, restore_best_weights=True)
+    early_stop = EarlyStopping(monitor='val_loss', patience=15)
     model.fit(
         X_train, y_train,
         batch_size=20,
@@ -322,6 +322,12 @@ def _tab_pablo_original() -> None:
     ```
 
     El problema es que `numeric_cols` incluye **meses posteriores al target** (Septiembre 2023, Octubre 2023, ..., hasta el último mes del dataset). Es decir, el modelo usaba **información del futuro** para predecir el pasado.
+
+    Además del leakage temporal había otros dos problemas menores: el `ID` del registro
+    (un identificador sin significado predictivo) entraba como feature por ser numérico,
+    y los valores faltantes se rellenaban con la media de cada columna calculada sobre el
+    dataset completo **antes** del split train/validación, filtrando información del set
+    de validación al entrenamiento.
 
     **Consecuencia:** los resultados se ven muy buenos (R² alto, MAE bajo), pero **no son reproducibles en producción** — al momento de predecir el próximo mes, naturalmente no tenemos los meses siguientes.
     """)
@@ -344,11 +350,18 @@ def _tab_pablo_original() -> None:
     | Arquitectura | `Dense(6,relu)→Dense(3,relu)→Dense(1)` | **Idéntica** |
     | Optimizer / Loss | `adam / mae` | **Idénticos** |
     | Batch size / Epochs | `20 / 200` | **Idénticos** |
-    | Early Stopping | `patience=15` | **Idéntico** |
-    | Features | Columnas de todos los meses (leakage) | Lags + rolling del pasado |
+    | Early Stopping | `monitor='val_loss', patience=15` (sin `restore_best_weights`) | `patience=15` |
+    | Features | Columnas de todos los meses + ID (leakage) | Lags + rolling del pasado |
     | Data leakage | Sí | No |
     | Uso en producción | No válido | Sí |
     """)
+
+    st.caption(
+        "Nota de reproducibilidad: el notebook de la iteración inicial, tal como fue "
+        "entregado, no corre de punta a punta (una celda falla por una variable sin "
+        "definir y otra referencia un scaler con otro nombre); los resultados que "
+        "muestra provienen de una ejecución anterior del kernel."
+    )
 
 
 # ============================================================================
@@ -388,7 +401,7 @@ def _tab_sobre_modelos() -> None:
     ```
 
     **Por qué en general da peor que LightGBM:**
-    - Es una red muy chica (~50 parámetros)
+    - Es una red muy chica (~350 parámetros)
     - Las redes neuronales no suelen dominar en datos tabulares
     - Para ganar necesitaríamos una arquitectura mucho más grande + más regularización
 
