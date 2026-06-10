@@ -17,6 +17,7 @@ import pytest
 
 from core import ratelimit
 from core.anomaly import compute_metric, detect_structural_anomalies, parse_month
+from core.cachekeys import df_fingerprint
 from core.excel_utils import (
     CONSUMO_NUMERIC_COLS,
     EXPECTED_VALORES_COLS,
@@ -111,6 +112,31 @@ def test_merge_degrada_a_dos_claves_sin_convenio_id():
     merged = merge_datasets(consumo, valores)
     assert len(merged) == 1                                  # sin fan-out
     assert merged.loc[0, "Valor Convenido a HOY"] == 90.0    # vigencia más reciente
+
+
+def test_merge_mixto_xlsx_curado_mas_export_crudo():
+    """El caso real del usuario: la tabla de consumo junta archivos curados
+    (con Convenio ID) y exports crudos (Convenio ID NULL). Ambos tipos de fila
+    deben encontrar tarifa (dos pasadas), sin fan-out, y la fila cruda hereda
+    el convenio del tarifario."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1130, 1130],
+        "Convenio ID": [7, pd.NA],          # curada / cruda
+        "Prestacion ID": [100, 100],
+        "Cantidad CM": [3, 5],
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1130, 1130],
+        "Convenio ID": [7, 7],
+        "Prestacion ID": [100, 100],
+        "Mes Vigencia": ["01-2025", "06-2025"],
+        "Valor Convenido a HOY": [80.0, 90.0],
+    })
+    merged = merge_datasets(consumo, valores)
+    assert len(merged) == 2                                   # ambas filas con tarifa
+    assert (merged["Valor Convenido a HOY"] == 90.0).all()    # vigencia más reciente
+    assert merged["Convenio ID"].notna().all()                # la cruda heredó el convenio
+    assert "Convenio ID_val" not in merged.columns
 
 
 def test_impact_metrics_formulas_del_workbook():
@@ -224,6 +250,22 @@ def test_format_currency_full_es_ar():
 
 def test_format_quantity_es_ar():
     assert format_quantity(1_234.56) == "1.234,56"
+
+
+def test_df_fingerprint_distingue_contenido():
+    """La huella barata de caché debe ser estable para el mismo contenido y
+    distinta cuando cambian los datos numéricos (filtro, prestador, mes)."""
+    a = pd.DataFrame({"x": [1, 2], "y": ["a", "b"]})
+    b = pd.DataFrame({"x": [1, 3], "y": ["a", "b"]})
+    assert df_fingerprint(a) == df_fingerprint(a.copy())
+    assert df_fingerprint(a) != df_fingerprint(b)            # contenido distinto
+    assert df_fingerprint(a) != df_fingerprint(a.head(1))    # largo distinto
+
+
+def test_format_int_es_ar():
+    from ui.formatters import format_int
+    assert format_int(644_984) == "644.984"
+    assert format_int(0) == "0"
 
 
 def test_safe_pct_evita_inf_y_nan():

@@ -133,19 +133,33 @@ def _upsert(con, table: str, key: tuple, df: pd.DataFrame) -> None:
     con.unregister("keys_new")
 
 
+def _archivar(path: Path) -> None:
+    """Mueve un archivo ya procesado a <carpeta>/procesados/ (la base DuckDB es
+    la fuente unificada; los archivos de entrada son solo material crudo)."""
+    dest_dir = path.parent / "procesados"
+    dest_dir.mkdir(exist_ok=True)
+    dest = dest_dir / path.name
+    if dest.exists():
+        dest = dest_dir / f"{path.stem}_{datetime.now():%Y%m%d%H%M%S}{path.suffix}"
+    path.rename(dest)
+    print(f"    archivado -> {dest}")
+
+
 def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
-                  mes: str | None = None) -> int:
+                  mes: str | None = None) -> tuple[int, bool]:
+    """Procesa un archivo. Devuelve (filas_insertadas, procesado_ok) — ok
+    incluye 'ya estaba ingerido' (es archivable)."""
     file_hash = _file_hash(path)
     if not rebuild and _already_ingested(con, file_hash):
         print(f"  - {path.name}: ya ingerido, saltando")
-        return 0
+        return 0, True
 
     content = path.read_bytes()
     try:
         df = xu.load_excel_smart(content, ds["expected"])
     except Exception as e:
         print(f"  ! {path.name}: no se pudo leer ({e}) — saltando")
-        return 0
+        return 0, False
 
     # El export CRUDO de consumo no trae el período en el archivo: se asigna
     # desde --mes. Tampoco trae 'Convenio ID' (la columna 'Convenio' es un
@@ -157,7 +171,7 @@ def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
         else:
             print(f"  ! {path.name}: el export no trae columna 'Mes'. "
                   f"Corré con --mes MM-YYYY para ingerirlo — saltando")
-            return 0
+            return 0, False
     if tipo == "consumo" and "Convenio ID" not in df.columns:
         df["Convenio ID"] = pd.NA
         print("    (export sin 'Convenio ID': queda NULL; "
@@ -166,7 +180,7 @@ def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
     miss = xu.missing_columns(df, ds["expected"])
     if miss:
         print(f"  ! {path.name}: faltan columnas {sorted(miss)} — saltando")
-        return 0
+        return 0, False
 
     # Limpia filas de Total/Subtotal y tipa las columnas numéricas.
     filas_antes = len(df)
@@ -187,10 +201,10 @@ def _process_file(con, tipo: str, ds: dict, path: Path, rebuild: bool,
     except Exception as e:
         con.execute("ROLLBACK")
         print(f"  ! {path.name}: error al insertar ({e})")
-        return 0
+        return 0, False
 
     print(f"  + {path.name}: {len(df):,} filas")
-    return len(df)
+    return len(df), True
 
 
 def _print_status(con) -> None:
@@ -214,6 +228,9 @@ def main() -> int:
                     help="Borra y reconstruye la base desde cero")
     ap.add_argument("--status", action="store_true",
                     help="Solo muestra qué hay cargado y sale")
+    ap.add_argument("--archivar", action="store_true",
+                    help="Mueve los archivos procesados OK a data/raw/<tipo>/procesados/ "
+                         "para que la carpeta de entrada no acumule archivos viejos")
     ap.add_argument("--mes", metavar="MM-YYYY", default=None,
                     help="Período de los archivos de consumo SIN columna 'Mes' "
                          "(el export crudo de MicroStrategy no la trae). "
@@ -258,7 +275,10 @@ def main() -> int:
         files = sorted([*ds["dir"].glob("*.xlsx"), *ds["dir"].glob("*.csv")])
         print(f"[{tipo}] {len(files)} archivo(s) en {ds['dir']}")
         for path in files:
-            total += _process_file(con, tipo, ds, path, args.rebuild, args.mes)
+            filas, ok = _process_file(con, tipo, ds, path, args.rebuild, args.mes)
+            total += filas
+            if ok and args.archivar:
+                _archivar(path)
 
     print(f"\nListo. {total:,} filas procesadas en esta corrida.")
     _print_status(con)

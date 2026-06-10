@@ -21,6 +21,8 @@ from typing import Iterable, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from core.cachekeys import df_fingerprint
+
 logger = logging.getLogger(__name__)
 
 from core.db import (
@@ -169,6 +171,79 @@ def get_prestadores_disponibles() -> Optional[list]:
 
 
 # ============================================================================
+# INGESTA DESDE LA APP (detectar archivos nuevos en data/raw y unificarlos)
+# ============================================================================
+@st.cache_data(ttl=60, show_spinner=False)
+def _pendientes_cached(dir_state: tuple, db_state: str) -> list[str]:
+    """Escaneo de archivos sin ingerir, cacheado por estado de carpeta + base
+    (hashear un xlsx de 40 MB en cada rerun sería caro)."""
+    from core import ingest_runner
+
+    return ingest_runner.listar_pendientes()
+
+
+def _render_ingesta_pendiente() -> None:
+    """
+    Si hay archivos nuevos en data/raw/ (consumo (1).csv, valores (2).xlsx,
+    etc., como los deja el navegador), ofrece ingerirlos y unificarlos a la
+    base desde la propia app — el equivalente a correr
+    `python scripts/ingest.py --archivar` en la terminal.
+    """
+    from core import ingest_runner
+
+    # Resultado de la última ingesta (quedó pendiente de mostrar tras el rerun)
+    if "_ingesta_resultado" in st.session_state:
+        ok, salida = st.session_state.pop("_ingesta_resultado")
+        if ok:
+            st.success("Ingesta finalizada: archivos unificados a la base.")
+        else:
+            st.error("La ingesta tuvo errores (ver detalle).")
+        with st.expander("Detalle de la ingesta"):
+            st.code(salida or "(sin salida)")
+
+    try:
+        pendientes = _pendientes_cached(
+            ingest_runner.estado_carpetas(), _db_fingerprint()
+        )
+    except Exception:
+        logger.exception("Error buscando archivos pendientes de ingesta")
+        return
+    if not pendientes:
+        return
+
+    st.divider()
+    nombres = ", ".join(pendientes[:4]) + ("…" if len(pendientes) > 4 else "")
+    st.info(f"**{len(pendientes)} archivo(s) nuevo(s)** en `data/raw/`: {nombres}")
+
+    mes_crudo = st.text_input(
+        "Mes de exports crudos (MM-YYYY)",
+        value="",
+        key="ingesta_mes",
+        help="Solo hace falta si algún archivo de consumo CRUDO no trae la "
+             "columna 'Mes' (el export de MicroStrategy no la incluye). "
+             "Usá el período que elegiste al descargarlo.",
+    )
+
+    if st.button("Ingerir y unificar ahora", key="ingesta_btn", type="primary"):
+        mes = mes_crudo.strip() or None
+        if mes and not pd.Series([mes]).str.fullmatch(r"\d{2}-\d{4}").iloc[0]:
+            st.warning(f"El mes debe ser MM-YYYY (recibido: {mes}).")
+            return
+        with st.spinner("Ingiriendo y unificando archivos (puede tardar varios minutos)..."):
+            # DuckDB no admite un escritor con lectores abiertos: cerrar la
+            # conexión read-only cacheada antes de lanzar la ingesta.
+            try:
+                _get_ro_connection().close()
+            except Exception:
+                logger.exception("No se pudo cerrar la conexión read-only")
+            st.cache_resource.clear()
+            ok, salida = ingest_runner.ejecutar_ingesta(mes)
+        st.session_state["_ingesta_resultado"] = (ok, salida)
+        st.cache_data.clear()
+        st.rerun()
+
+
+# ============================================================================
 # FALLBACK: UPLOAD MANUAL
 # ============================================================================
 def _load_from_upload(
@@ -242,6 +317,8 @@ def load_consumo_and_valores(
             st.cache_resource.clear()
             st.rerun()
 
+        _render_ingesta_pendiente()
+
         # ---- Fallback: upload manual si falta algún dataset ----
         if df_consumo is None:
             st.divider()
@@ -286,7 +363,7 @@ def load_consumo_and_valores(
 # de "Procesando datos..." reaparecía a cada interacción (el "parpadeo"). Acá
 # se cachean: solo se recalculan cuando cambian los datos de entrada.
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_merged_dataset(
     df_consumo: pd.DataFrame, df_valores: pd.DataFrame
 ) -> pd.DataFrame:
@@ -314,7 +391,7 @@ def load_merged_completo() -> Optional[pd.DataFrame]:
     return get_merged_dataset(c, v)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_normalized_consumo(df_consumo: pd.DataFrame) -> pd.DataFrame:
     """Normaliza tipos del dataset de consumo (cacheado). Usado por Mód. 2 y 3."""
     from core.simulator import normalize_dataframes

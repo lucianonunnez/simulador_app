@@ -8,13 +8,14 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from core.cachekeys import df_fingerprint
 from core.data_loader import (
     get_merged_dataset,
     get_prestadores_disponibles,
     load_consumo_and_valores,
 )
 from core.simulator import apply_simulation, impact_metrics, merge_match_rate
-from ui.formatters import format_currency, format_currency_full
+from ui.formatters import format_currency, format_currency_full, format_int
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
 
@@ -22,7 +23,23 @@ from ui.simulator_tabs import render_tabs
 # ============================================================================
 # CÁLCULO CACHEADO
 # ============================================================================
-@st.cache_data(show_spinner=False, max_entries=50)
+@st.cache_data(show_spinner=False, max_entries=10,
+               hash_funcs={pd.DataFrame: df_fingerprint})
+def _tabla_negociacion(df_simulated: pd.DataFrame) -> pd.DataFrame:
+    """Tabla de valores por prestación (cacheada: el drop_duplicates sobre
+    cientos de miles de filas costaba en cada rerun)."""
+    cols_neg = ["Prestacion ID", "Prestacion Desc", "Nomenclador",
+                "Valor Convenido a HOY", "Valor Ofrecido", "% Aumento"]
+    return (
+        df_simulated[cols_neg]
+        .drop_duplicates(subset=["Prestacion ID"])
+        .sort_values("% Aumento", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=50,
+               hash_funcs={pd.DataFrame: df_fingerprint})
 def _apply_simulation_cached(
     df_scope, mode, flat_pct, nomenclador_pcts, prestacion_pcts
 ):
@@ -157,7 +174,7 @@ def render() -> None:
         )
         return
 
-    st.caption(f"Datos listos · **{len(df_merged):,}** registros")
+    st.caption(f"Datos listos · **{format_int(len(df_merged))}** registros")
 
     # El inner join descarta en silencio el consumo sin tarifa. Si la cobertura
     # es baja (tarifario incompleto o de otro prestador), avisar: los totales
@@ -222,10 +239,10 @@ def render() -> None:
     dif          = total_sim - total_ideal
     pct          = (dif / total_ideal * 100) if total_ideal > 0 else 0
 
-    detalle_excl = f" · Excluidas (No pauta / sin tarifa): **{n_fuera:,}**" if n_fuera else ""
+    detalle_excl = f" · Excluidas (No pauta / sin tarifa): **{format_int(n_fuera)}**" if n_fuera else ""
     st.caption(
         f"Período analizado: **{n_meses} mes(es)** · "
-        f"{len(df_simulated):,} registros simulados{detalle_excl}"
+        f"{format_int(len(df_simulated))} registros simulados{detalle_excl}"
     )
     _render_metrics(total_ideal, total_sim, dif, pct, n_meses)
 
@@ -244,14 +261,7 @@ def render() -> None:
     with st.expander("Tabla de Negociación — Valores por Prestación", expanded=True):
         st.caption("Valor actual vs. valor ofrecido por prestación.")
 
-        cols_neg = ["Prestacion ID", "Prestacion Desc", "Nomenclador",
-                    "Valor Convenido a HOY", "Valor Ofrecido", "% Aumento"]
-        df_neg = (
-            df_simulated[cols_neg]
-            .drop_duplicates(subset=["Prestacion ID"])
-            .sort_values("% Aumento", ascending=False)
-            .reset_index(drop=True)
-        )
+        df_neg = _tabla_negociacion(df_simulated)
         df_neg_display = df_neg.copy()
         df_neg_display["Valor Convenido a HOY"] = df_neg_display["Valor Convenido a HOY"].apply(format_currency_full)
         df_neg_display["Valor Ofrecido"]        = df_neg_display["Valor Ofrecido"].apply(format_currency_full)

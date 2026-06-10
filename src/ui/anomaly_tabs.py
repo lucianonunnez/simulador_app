@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 
+from core.cachekeys import df_fingerprint
 from core.anomaly import (
     build_alerts_ranking,
     build_time_series,
@@ -31,19 +32,20 @@ from ui.formatters import format_currency, format_currency_full, format_quantity
 # Separar build_time_series (no depende del umbral) de la detección permite que
 # mover un slider de umbral/ventana NO reconstruya la serie temporal.
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def _build_time_series_cached(df, group_cols, metric):
     return build_time_series(df, group_cols, metric)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def _detect_temporal_cached(ts, group_cols, method, window, threshold):
     return detect_temporal_anomalies(
         ts, group_cols=group_cols, method=method, window=window, threshold=threshold
     )
 
 
-@st.cache_data(show_spinner=False, max_entries=50)
+@st.cache_data(show_spinner=False, max_entries=50,
+               hash_funcs={pd.DataFrame: df_fingerprint})
 def _detect_structural_cached(df, peer_group_cols, method, threshold, metric):
     return detect_structural_anomalies(
         df, peer_group_cols=peer_group_cols, method=method,
@@ -51,7 +53,7 @@ def _detect_structural_cached(df, peer_group_cols, method, threshold, metric):
     )
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def _build_ranking_cached(ts_with_flags, entity_cols, last_month_only, top_n):
     return build_alerts_ranking(
         ts_with_flags, entity_cols=entity_cols,
