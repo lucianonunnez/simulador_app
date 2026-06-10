@@ -11,9 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar archivos de la app
+# Copiar archivos de la app.
+# OJO: de .streamlit/ solo va config.toml — el secrets.toml JAMÁS entra a la
+# imagen (las credenciales se inyectan en runtime: volumen montado o Secrets
+# del host/Space). .dockerignore refuerza esto por si el COPY se generaliza.
 COPY src/ ./src/
-COPY .streamlit/ ./.streamlit/
+COPY .streamlit/config.toml ./.streamlit/config.toml
 COPY models/ ./models/
 
 # HF Spaces usa el puerto 8501 por default para Streamlit

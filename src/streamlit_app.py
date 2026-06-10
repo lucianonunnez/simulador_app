@@ -4,10 +4,22 @@ Entry point de la aplicación Streamlit.
 v0.5.2 — diseño Swiss Medical
 """
 
+import html
+import logging
+
 import streamlit as st
 
 from auth import require_login, render_logout, get_current_user
 from modules import module1, module2, module3
+
+# ============================================================================
+# LOGGING — antes no había NINGÚN logging en la app: un fallo en vivo no
+# dejaba rastro. basicConfig es no-op si ya hay handlers (reruns de Streamlit).
+# ============================================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 # ============================================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -186,12 +198,16 @@ require_login()
 # APP PRINCIPAL
 # ============================================================================
 user = get_current_user()
+# Los datos de usuario se interpolan en HTML (unsafe_allow_html): escapar
+# siempre, aunque hoy vengan de secrets.toml controlado por el admin.
+_nombre = html.escape(user["name"])
+_usuario = html.escape(user["username"])
 
 with st.sidebar:
     st.markdown(f"""
     <div style="padding: 8px 0 16px 0;">
-        <div style="font-size:15px; font-weight:700; color:#212529;">{user['name']}</div>
-        <div style="font-size:12px; color:#797979;">Conectado como <code>{user['username']}</code></div>
+        <div style="font-size:15px; font-weight:700; color:#212529;">{_nombre}</div>
+        <div style="font-size:12px; color:#797979;">Conectado como <code>{_usuario}</code></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -285,7 +301,7 @@ if modulo == "Inicio":
                 background:#FFF0F3; border-radius:8px;
                 border-left: 3px solid #E4002B;
                 font-size:13px; color:#212529;">
-        Bienvenido, <strong>{user['name']}</strong> — 
+        Bienvenido, <strong>{_nombre}</strong> —
         seleccioná un módulo en el menú de la izquierda para comenzar.
     </div>
     """, unsafe_allow_html=True)

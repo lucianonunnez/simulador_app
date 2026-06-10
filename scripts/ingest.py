@@ -224,7 +224,18 @@ def main() -> int:
         print(f"--mes debe ser MM-YYYY (recibido: {args.mes!r})")
         return 1
 
-    con = db.get_connection(read_only=False)
+    try:
+        con = db.get_connection(read_only=False)
+    except Exception as e:
+        if "lock" in str(e).lower():
+            # DuckDB no permite un escritor mientras hay lectores abiertos.
+            print(
+                "ERROR: la base está bloqueada por otro proceso.\n"
+                "Cerrá la app Streamlit (que mantiene lectores abiertos) "
+                "antes de correr la ingesta, y reintentá."
+            )
+            return 1
+        raise
     _ensure_log(con)
 
     if args.status:

@@ -15,10 +15,14 @@ Gestión de usuarios:
     Ver README.md y docs/DESPLIEGUE_SEGURO.md.
 """
 
+import logging
+
 import streamlit as st
 import streamlit_authenticator as stauth
 
 from core.audit import log_event
+
+logger = logging.getLogger(__name__)
 
 
 def _build_authenticator() -> stauth.Authenticate:
@@ -35,7 +39,6 @@ def _build_authenticator() -> stauth.Authenticate:
         name = "Luciano Núñez"
         email = "luciano@ejemplo.com"
         password = "$2b$12$..."   # hash bcrypt
-        role = "admin"
     """
     if "credentials" not in st.secrets:
         st.error(
@@ -82,8 +85,11 @@ def require_login() -> None:
     # con authentication_status, name, username.
     try:
         authenticator.login(location="main")
-    except Exception as e:
-        st.error(f"Error en login: {e}")
+    except Exception:
+        # El detalle va al log: el mensaje de excepción puede filtrar rutas
+        # o configuración interna al usuario.
+        logger.exception("Error inesperado en el formulario de login")
+        st.error("No se pudo iniciar sesión. Reintentá; si persiste, contactá al administrador.")
         st.stop()
 
     status = st.session_state.get("authentication_status")
@@ -125,23 +131,16 @@ def get_current_user() -> dict:
         {
             "username": str,   # el "luciano"
             "name": str,       # el "Luciano Núñez"
-            "role": str,       # "admin" o "user"
         }
+
+    Nota: el campo "role" se eliminó a propósito. Ningún módulo autorizaba
+    nada con él, así que daba una falsa sensación de control de acceso
+    (hallazgo de la auditoría de seguridad). Si en el futuro hay acciones
+    que requieran privilegios, reintroducirlo junto con el gate real.
     """
-    username = st.session_state.get("username", "")
-    name = st.session_state.get("name", "")
-
-    # role no viene de session_state, lo sacamos de secrets directo
-    role = "user"
-    try:
-        role = st.secrets["credentials"]["usernames"][username].get("role", "user")
-    except (KeyError, AttributeError):
-        pass
-
     return {
-        "username": username,
-        "name": name,
-        "role": role,
+        "username": st.session_state.get("username", ""),
+        "name": st.session_state.get("name", ""),
     }
 
 

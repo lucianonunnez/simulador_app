@@ -19,7 +19,7 @@ from core.anomaly import (
     detect_structural_anomalies,
     detect_temporal_anomalies,
 )
-from ui.formatters import format_currency, format_currency_full, format_quantity
+from ui.formatters import format_currency, format_currency_full, format_quantity, safe_pct
 
 
 # ============================================================================
@@ -428,9 +428,10 @@ def _render_temporal_view(
         fmt = format_currency_full if config["metric"] in ("precio_unitario", "importe_total") else format_quantity
         display["Valor real"] = display["valor"].apply(fmt)
         display["Esperado"]   = display["media_movil"].apply(fmt)
-        display["Desvío %"]   = (
-            (display["valor"] - display["media_movil"]) / display["media_movil"] * 100
-        ).apply(lambda x: f"{x:+.1f}%")
+        display["Desvío %"]   = [
+            f"{p:+.1f}%" if (p := safe_pct(v - m, m)) is not None else "-"
+            for v, m in zip(display["valor"], display["media_movil"])
+        ]
         st.dataframe(display[["Mes", "Valor real", "Esperado", "Desvío %"]],
                      use_container_width=True, hide_index=True)
     else:

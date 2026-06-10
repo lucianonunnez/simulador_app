@@ -5,15 +5,28 @@ v0.5.2 — diseño Swiss Medical
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+logger = logging.getLogger(__name__)
+
 from core.indec import fetch_inflation
 from core.simulator import aggregate_top_n
 from ui.formatters import format_currency, format_currency_full, format_quantity
+from ui.theme import (
+    COLOR_BLANCO,   # noqa: F401  (re-export histórico)
+    COLOR_FONDO,
+    COLOR_GRIS,
+    COLOR_ROJO,
+    COLOR_ROJO_DK,  # noqa: F401
+    COLOR_TEXTO,
+    layout_base as _layout_base,
+)
 
 
 # Meses en español
@@ -23,42 +36,9 @@ MESES_ES = {
     9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic",
 }
 
-# Paleta Swiss Medical
-COLOR_ROJO    = "#E4002B"
-COLOR_ROJO_DK = "#B8001F"
-COLOR_GRIS    = "#797979"
-COLOR_TEXTO   = "#212529"
-COLOR_FONDO   = "#F8F9FA"
-COLOR_BLANCO  = "#FFFFFF"
-
 # Colores para barras dobles (ideal vs simulado)
 COLOR_IDEAL   = "#E4002B"
 COLOR_SIM     = "#343A40"
-
-
-def _layout_base(title: str = "", height: int = 450) -> dict:
-    """Layout común para todos los gráficos."""
-    return dict(
-        title=dict(text=title, font=dict(color=COLOR_TEXTO, size=15, family="Roboto", weight="bold")),
-        plot_bgcolor=COLOR_BLANCO,
-        paper_bgcolor=COLOR_FONDO,
-        font=dict(family="Roboto", color=COLOR_TEXTO),
-        hovermode="x unified",
-        height=height,
-        xaxis=dict(
-            title_font=dict(color=COLOR_TEXTO, size=13, weight="bold"),
-            tickfont=dict(color=COLOR_TEXTO, size=11),
-            gridcolor="#E9ECEF",
-            linecolor="#E9ECEF",
-        ),
-        yaxis=dict(
-            title_font=dict(color=COLOR_TEXTO, size=13, weight="bold"),
-            tickfont=dict(color=COLOR_TEXTO),
-            gridcolor="#E9ECEF",
-            linecolor="#E9ECEF",
-        ),
-        legend=dict(font=dict(color=COLOR_TEXTO)),
-    )
 
 
 def _mes_label(dt) -> str:
@@ -205,8 +185,9 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.error("El archivo debe tener columnas 'Mes' e 'Inflacion'")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                except Exception:
+                    logger.exception("Error leyendo el archivo de inflación subido")
+                    st.error("No se pudo leer el archivo. Verificá el formato (csv/xlsx).")
 
 
 # ----------------------------------------------------------------------------
@@ -249,7 +230,7 @@ def _tab_nomenclador(df: pd.DataFrame) -> None:
         # pero podemos formatear: mostrar vacío si < 5%
         total_val = df_agg["Consumo Ideal"].sum()
         fig.update_traces(
-            text=[f"{v/total_val*100:.1f}%" if v/total_val >= 0.05 else ""
+            text=[f"{v/total_val*100:.1f}%" if total_val > 0 and v/total_val >= 0.05 else ""
                   for v in df_agg["Consumo Ideal"]],
             textinfo="text",
         )

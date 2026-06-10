@@ -11,8 +11,10 @@ textColor = "#212529"
 font = "sans serif"
 
 [server]
-# Max upload size (MB).
-maxUploadSize = 200
+# Max upload size (MB). 50 alcanza de sobra para los exports de MicroStrategy
+# (un consumo mensual ronda los 3 MB); un techo bajo acota el riesgo de DoS
+# por archivos gigantes (openpyxl descomprime todo en RAM).
+maxUploadSize = 50
 
 # DESPLIEGUE LOCAL EN LA LAN (configuración actual, ver docs/DESPLIEGUE_SEGURO.md).
 # Al servir por IP en la red corporativa, estas protecciones DEBEN estar activas:

@@ -32,7 +32,12 @@ from core.simulator import (
     merge_datasets,
     merge_match_rate,
 )
-from ui.formatters import format_currency, format_currency_full, format_quantity
+from ui.formatters import (
+    format_currency,
+    format_currency_full,
+    format_quantity,
+    safe_pct,
+)
 
 
 # ----------------------------------------------------------------------------
@@ -173,6 +178,13 @@ def test_format_currency_full_es_ar():
 
 def test_format_quantity_es_ar():
     assert format_quantity(1_234.56) == "1.234,56"
+
+
+def test_safe_pct_evita_inf_y_nan():
+    assert safe_pct(50, 200) == pytest.approx(25.0)
+    assert safe_pct(10, 0) is None          # división por cero -> None, no inf
+    assert safe_pct(10, float("nan")) is None
+    assert safe_pct(float("nan"), 10) is None
 
 
 # ----------------------------------------------------------------------------

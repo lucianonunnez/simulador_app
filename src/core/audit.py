@@ -13,9 +13,12 @@ es testeable de forma aislada.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 LOG_DIR = Path("logs")
 AUDIT_FILE = LOG_DIR / "auth_audit.log"
@@ -76,5 +79,6 @@ def log_event(
         with open(AUDIT_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
-        # La auditoría nunca debe tumbar la app: si falla el log, seguimos.
-        pass
+        # La auditoría nunca debe tumbar la app: si falla el log, seguimos —
+        # pero dejamos rastro en el log de aplicación para diagnosticarlo.
+        logger.exception("No se pudo escribir el evento de auditoría %s", event)
