@@ -20,7 +20,13 @@ from core.ml_predictor import (
     predecir_lightgbm,
     predecir_pablo,
 )
-from ui.formatters import format_currency, format_quantity
+from ui.formatters import format_currency, format_quantity, safe_pct
+from ui.theme import (
+    COLOR_PRINCIPAL,
+    COLOR_SECUNDARIO,
+    COLOR_TERCIARIO,
+    layout_base,
+)
 
 
 METRIC_LABEL = {
@@ -115,34 +121,32 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
     fmt = format_currency if config["metric"] in ("importe", "precio") else format_quantity
     total_real = ts["real"].sum()
     total_pred = ts["prediccion"].sum()
-    error_pct = ((total_pred - total_real) / total_real * 100) if total_real > 0 else 0
+    error_pct = safe_pct(total_pred - total_real, total_real)
 
     c3.metric("Real total", fmt(total_real))
-    c4.metric("Predicho total", fmt(total_pred), f"{error_pct:+.1f}%")
+    c4.metric("Predicho total", fmt(total_pred),
+              f"{error_pct:+.1f}%" if error_pct is not None else None)
 
     # --- Gráfico ---
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=ts["mes_dt"], y=ts["real"],
         mode="lines+markers",
-        line=dict(color="#2c3e50", width=2),
+        line=dict(color=COLOR_SECUNDARIO, width=2),
         marker=dict(size=8),
         name="Valor real",
     ))
     fig.add_trace(go.Scatter(
         x=ts["mes_dt"], y=ts["prediccion"],
         mode="lines+markers",
-        line=dict(color="#667eea", width=2, dash="dash"),
+        line=dict(color=COLOR_PRINCIPAL, width=2, dash="dash"),
         marker=dict(size=8, symbol="diamond"),
         name=f"Predicción ({MODEL_LABEL.get(modelo_principal, modelo_principal)})",
     ))
-    fig.update_layout(
-        title=f"{METRIC_LABEL[config['metric']]} — real vs predicho",
-        xaxis_title="Mes",
-        yaxis_title=METRIC_LABEL[config["metric"]],
-        hovermode="x unified",
-        height=450,
-    )
+    layout = layout_base(title=f"{METRIC_LABEL[config['metric']]} — real vs predicho")
+    layout["xaxis"]["title"] = dict(text="Mes")
+    layout["yaxis"]["title"] = dict(text=METRIC_LABEL[config["metric"]])
+    fig.update_layout(**layout)
     st.plotly_chart(fig, use_container_width=True)
 
     # --- Tabla de detalle ---
@@ -151,9 +155,10 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
         display["Mes"] = display["mes_dt"].dt.strftime("%m-%Y")
         display["Real"] = display["real"].apply(fmt)
         display["Predicho"] = display["prediccion"].apply(fmt)
-        display["Error %"] = ((display["prediccion"] - display["real"]) / display["real"] * 100).apply(
-            lambda x: f"{x:+.1f}%" if pd.notna(x) and x != float("inf") else "-"
-        )
+        display["Error %"] = [
+            f"{p:+.1f}%" if (p := safe_pct(pred - real, real)) is not None else "-"
+            for pred, real in zip(display["prediccion"], display["real"])
+        ]
         st.dataframe(
             display[["Mes", "Real", "Predicho", "Error %"]],
             use_container_width=True,
@@ -218,25 +223,22 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
     fig.add_trace(go.Scatter(
         x=ts_lgb["mes_dt"], y=ts_lgb["real"],
         mode="lines+markers", name="Valor real",
-        line=dict(color="#2c3e50", width=3),
+        line=dict(color=COLOR_SECUNDARIO, width=3),
     ))
     fig.add_trace(go.Scatter(
         x=ts_lgb["mes_dt"], y=ts_lgb["pred"],
         mode="lines+markers", name="LightGBM",
-        line=dict(color="#1f77b4", width=2, dash="dash"),
+        line=dict(color=COLOR_PRINCIPAL, width=2, dash="dash"),
     ))
     fig.add_trace(go.Scatter(
         x=ts_pablo["mes_dt"], y=ts_pablo["pred"],
         mode="lines+markers", name="Red Neuronal",
-        line=dict(color="#9467bd", width=2, dash="dot"),
+        line=dict(color=COLOR_TERCIARIO, width=2, dash="dot"),
     ))
-    fig.update_layout(
-        title="Real vs ambos modelos",
-        xaxis_title="Mes",
-        yaxis_title=METRIC_LABEL[config["metric"]],
-        hovermode="x unified",
-        height=500,
-    )
+    layout = layout_base(title="Real vs ambos modelos", height=500)
+    layout["xaxis"]["title"] = dict(text="Mes")
+    layout["yaxis"]["title"] = dict(text=METRIC_LABEL[config["metric"]])
+    fig.update_layout(**layout)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -263,8 +265,13 @@ def _tab_feature_importance(config: dict) -> None:
         orientation="h",
         title=f"Top 15 variables — LightGBM ({METRIC_LABEL[config['metric']]})",
     )
-    fig.update_traces(marker_color="#667eea")
-    fig.update_layout(height=500)
+    fig.update_traces(marker_color=COLOR_PRINCIPAL)
+    layout = layout_base(
+        title=f"Top 15 variables — LightGBM ({METRIC_LABEL[config['metric']]})",
+        height=500,
+    )
+    layout["hovermode"] = "closest"
+    fig.update_layout(**layout)
     st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("¿Qué significa cada feature?"):

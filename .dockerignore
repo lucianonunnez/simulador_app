@@ -1,0 +1,34 @@
+# ============================================================================
+# NUNCA hornear en la imagen Docker (hallazgo crítico de la auditoría de
+# seguridad: COPY .streamlit/ copiaba el secrets.toml real a una capa de la
+# imagen — fatal si la imagen se pushea a un registro o a Hugging Face).
+# ============================================================================
+.streamlit/secrets.toml
+**/secrets.toml
+*.secret
+.env
+.env.*
+
+# Datos de negocio sensibles (jamás dentro de la imagen)
+data/
+*.duckdb
+*.duckdb.wal
+*.xlsx
+*.xls
+*.csv
+logs/
+
+# Ruido de build
+.git/
+.github/
+.claude/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+tests/
+docs/
+deploy/
+*.md

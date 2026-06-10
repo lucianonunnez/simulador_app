@@ -42,3 +42,15 @@ def format_quantity(value: float) -> str:
     if pd.isna(value) or value == 0:
         return "0,00"
     return _es_ar(value)
+
+
+def safe_pct(num: float, den: float) -> float | None:
+    """
+    num / den * 100, o None si el denominador es 0/NaN.
+
+    Evita que aparezcan 'inf%' o 'nan%' en pantalla cuando una base es cero
+    (ej: error % contra un valor real que ese mes fue 0).
+    """
+    if den is None or pd.isna(den) or den == 0 or num is None or pd.isna(num):
+        return None
+    return float(num) / float(den) * 100

@@ -15,9 +15,12 @@ Por qué DuckDB y no cargar el Excel a RAM (como antes):
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import duckdb
+
+logger = logging.getLogger(__name__)
 
 # La base vive dentro de data/ (gitignored): nunca se versiona ni se sube.
 DB_PATH = Path("data") / "simulador.duckdb"
@@ -50,7 +53,7 @@ def get_connection(read_only: bool = False) -> duckdb.DuckDBPyConnection:
         con.execute(f"SET memory_limit = '{MEMORY_LIMIT}'")
     except Exception:
         # Si la versión de DuckDB no soporta el pragma, seguimos igual.
-        pass
+        logger.warning("No se pudo fijar memory_limit=%s en DuckDB", MEMORY_LIMIT)
     return con
 
 

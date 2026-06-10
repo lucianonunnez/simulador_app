@@ -15,10 +15,13 @@ uploader manual en el sidebar para no dejar la app inutilizable.
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from core.db import (
     CONSUMO_TABLE,
@@ -48,6 +51,17 @@ def _as_tuple(x: Optional[Iterable]) -> Optional[tuple]:
 # ============================================================================
 # CONSULTA A DUCKDB
 # ============================================================================
+@st.cache_resource(ttl=600, show_spinner=False)
+def _get_ro_connection():
+    """
+    Conexión de solo-lectura cacheada (DuckDB admite múltiples lectores).
+
+    Antes se abría y cerraba una conexión por consulta y por rerun: frágil y
+    más lento. La conexión cacheada se renueva sola cada 10 min (ttl).
+    """
+    return get_connection(read_only=True)
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def _query_table(
     table: str,
@@ -64,8 +78,8 @@ def _query_table(
     if not DB_PATH.exists():
         return None
 
-    con = get_connection(read_only=True)
     try:
+        con = _get_ro_connection()
         if not table_exists(con, table):
             return None
 
@@ -89,10 +103,20 @@ def _query_table(
         df = con.execute(sql, params).fetch_df()
         return df if len(df) else None
     except Exception as e:
-        st.error(f"Error consultando '{table}' en DuckDB: {e}")
+        # Detalle técnico al log; mensaje entendible al usuario (sin internals).
+        logger.exception("Error consultando la tabla '%s' en la base local", table)
+        if "lock" in str(e).lower():
+            st.error(
+                "La base de datos está siendo usada por otro proceso "
+                "(probablemente una ingesta en curso). Esperá a que termine "
+                "y recargá la página."
+            )
+        else:
+            st.error(
+                "No se pudieron cargar los datos. Reintentá en unos segundos; "
+                "si persiste, contactá al equipo técnico."
+            )
         return None
-    finally:
-        con.close()
 
 
 # ============================================================================
@@ -114,8 +138,12 @@ def _load_from_upload(
         df = clean_dataset(df, numeric_cols)
         st.success(f"{label} cargado: {len(df):,} filas")
         return df
-    except Exception as e:
-        st.error(f"Error leyendo {label}: {e}")
+    except Exception:
+        logger.exception("Error leyendo el archivo subido de %s", label)
+        st.error(
+            f"No se pudo leer el archivo de {label}. Verificá que sea un "
+            "export válido (xlsx o csv) y reintentá."
+        )
         return None
 
 

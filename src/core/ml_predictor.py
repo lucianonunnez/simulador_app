@@ -196,7 +196,7 @@ def enriquecer_con_categoricas(df_features: pd.DataFrame, df_consumo: pd.DataFra
     return df_features.merge(modas, on=["Prestador ID", "Prestacion ID"], how="left")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=20)
 def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     """
     Panel + lags/rolling + categóricas, todo en uno y cacheado.
@@ -213,7 +213,7 @@ def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
 # ============================================================================
 # PREDICCIÓN
 # ============================================================================
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=20)
 def predecir_lightgbm(
     df_consumo: pd.DataFrame,
     metric: str,
@@ -236,9 +236,9 @@ def predecir_lightgbm(
 
     # Filtros opcionales
     if filtro_prestador is not None:
-        df_feat = df_feat[df_feat["Prestador ID"] == filtro_prestador]
+        df_feat = df_feat[df_feat["Prestador ID"] == filtro_prestador].copy()
     if filtro_prestacion is not None:
-        df_feat = df_feat[df_feat["Prestacion ID"].astype(str) == str(filtro_prestacion)]
+        df_feat = df_feat[df_feat["Prestacion ID"].astype(str) == str(filtro_prestacion)].copy()
 
     if len(df_feat) == 0:
         return pd.DataFrame()
@@ -267,7 +267,7 @@ def predecir_lightgbm(
     return out.reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=20)
 def predecir_pablo(
     df_consumo: pd.DataFrame,
     metric: str,
@@ -282,9 +282,9 @@ def predecir_pablo(
     df_feat = construir_features(df_consumo, metric)
 
     if filtro_prestador is not None:
-        df_feat = df_feat[df_feat["Prestador ID"] == filtro_prestador]
+        df_feat = df_feat[df_feat["Prestador ID"] == filtro_prestador].copy()
     if filtro_prestacion is not None:
-        df_feat = df_feat[df_feat["Prestacion ID"].astype(str) == str(filtro_prestacion)]
+        df_feat = df_feat[df_feat["Prestacion ID"].astype(str) == str(filtro_prestacion)].copy()
 
     if len(df_feat) == 0:
         return pd.DataFrame()
