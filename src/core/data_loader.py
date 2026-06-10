@@ -162,8 +162,8 @@ def load_consumo_and_valores(
                 "`python scripts/ingest.py`."
             )
             up_c = st.file_uploader(
-                "Subir Consumo (xlsx)",
-                type=["xlsx"],
+                "Subir Consumo (xlsx/csv)",
+                type=["xlsx", "csv"],
                 key="upload_consumo",
                 label_visibility="collapsed",
             )
@@ -178,8 +178,8 @@ def load_consumo_and_valores(
                 "`python scripts/ingest.py`."
             )
             up_v = st.file_uploader(
-                "Subir Valores (xlsx)",
-                type=["xlsx"],
+                "Subir Valores (xlsx/csv)",
+                type=["xlsx", "csv"],
                 key="upload_valores",
                 label_visibility="collapsed",
             )

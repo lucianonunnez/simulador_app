@@ -18,8 +18,11 @@ import pytest
 from core.anomaly import compute_metric
 from core.excel_utils import (
     CONSUMO_NUMERIC_COLS,
+    EXPECTED_VALORES_COLS,
     clean_dataset,
+    load_excel_smart,
     normalize_month_series,
+    normalize_mstr_columns,
     to_numeric_tolerante,
 )
 from core.ml_predictor import _is_usable_model_file
@@ -162,6 +165,69 @@ def test_to_numeric_tolerante_formato_microstrategy():
     assert pd.isna(out[3])   # '-' es vacío, no número
     assert pd.isna(out[4])
     assert out[5] == 42
+
+
+def test_to_numeric_tolerante_negativos_contables():
+    """Los exports reales traen negativos entre paréntesis: '(5,477,196)'."""
+    out = to_numeric_tolerante(pd.Series(["(5,477,196)", "(2.50)"]))
+    assert out[0] == -5477196
+    assert out[1] == pytest.approx(-2.50)
+
+
+# ----------------------------------------------------------------------------
+# core.excel_utils — mapeo de columnas crudas de MicroStrategy
+# ----------------------------------------------------------------------------
+def test_normalize_mstr_columns_estilo_consumo():
+    """Consumo crudo: ID en la columna nombrada, Desc en la 'Unnamed' contigua;
+    'Convenio' trae un flag (no ID) -> solo se mapea la Desc."""
+    df = pd.DataFrame({
+        "Prestador": ["1,130 ", "1,130 "],
+        "Unnamed: 1": ["Clinica Ficticia", "Clinica Ficticia"],
+        "Convenio": ["P", "0"],
+        "Unnamed: 3": ["Convenio Ficticio - Amb", "Convenio Ficticio - Int"],
+        "Prestacion": ["Consulta de prueba", "Práctica de prueba"],
+        "Unnamed: 5": ["42010100", "150101"],
+        "Cantidad CM": ["10 ", "5 "],
+    })
+    out = normalize_mstr_columns(df)
+    assert "Prestador ID" in out.columns and "Prestador Desc" in out.columns
+    assert "Convenio Desc" in out.columns
+    assert "Convenio ID" not in out.columns          # el export no lo trae
+    assert "Prestacion ID" in out.columns and "Prestacion Desc" in out.columns
+    assert out.loc[0, "Prestacion ID"] == "42010100"
+    assert not any(str(c).startswith("Unnamed") for c in out.columns)
+
+
+def test_normalize_mstr_columns_no_toca_archivos_curados():
+    df = pd.DataFrame({"Prestador ID": [1], "Prestador Desc": ["X"], "Mes": ["01-2025"]})
+    out = normalize_mstr_columns(df)
+    assert list(out.columns) == ["Prestador ID", "Prestador Desc", "Mes"]
+
+
+def test_load_excel_smart_csv_utf8_bom_y_orden_invertido():
+    """CSV estilo 'valores': UTF-8 con BOM, Desc en la nombrada e ID en la Unnamed."""
+    csv = (
+        "﻿Prestador,Unnamed: 1,Convenio,Unnamed: 3,Prestacion,Unnamed: 5,"
+        "Mes Vigencia,Valor Convenido a HOY\n"
+        '99999,Sanatorio Ficticio,Convenio Ficticio Ambulatorio,4962,'
+        '"Biopsia de prueba, c/u",150101,Mayo 2026,"8,206.90"\n'
+    ).encode("utf-8")
+    df = load_excel_smart(csv, EXPECTED_VALORES_COLS)
+    assert df.loc[0, "Prestador ID"] == 99999
+    assert df.loc[0, "Convenio ID"] == 4962
+    assert df.loc[0, "Prestacion Desc"].startswith("Biopsia")
+    assert df.loc[0, "Mes Vigencia"] == "Mayo 2026"
+
+
+def test_load_excel_smart_csv_mac_roman_con_cr():
+    """CSV estilo 'consumo': encoding Mac OS Roman y finales de línea CR-only."""
+    texto = (
+        "Prestador,Unnamed: 1,Cantidad CM,Importe CM\r"
+        '"1,130 ",Clínica Ñandú,"2,073 ","(5,477,196)"\r'
+    )
+    df = load_excel_smart(texto.encode("mac_roman"), set())
+    assert df.loc[0, "Prestador ID"].strip() == "1,130"   # numérico recién en clean_dataset
+    assert df.loc[0, "Prestador Desc"] == "Clínica Ñandú"   # acentos correctos
 
 
 def test_clean_dataset_ids_con_coma_de_miles_no_pierden_filas():

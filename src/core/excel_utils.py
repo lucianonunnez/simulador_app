@@ -15,7 +15,8 @@ Acá viven:
 
 from __future__ import annotations
 
-from io import BytesIO
+import re
+from io import BytesIO, StringIO
 
 import pandas as pd
 
@@ -82,13 +83,146 @@ def detect_header_row(file_content: bytes, expected_cols: set, max_rows: int = 1
     return best_row
 
 
-def load_excel_smart(file_content: bytes, expected_cols: set) -> pd.DataFrame:
-    """Carga un Excel autodetectando la fila de encabezado y limpiando nombres."""
-    skiprows = detect_header_row(file_content, expected_cols)
-    buf = BytesIO(file_content)
-    df = pd.read_excel(buf, skiprows=skiprows, engine="openpyxl")
-    df.columns = df.columns.astype(str).str.strip()
+# ============================================================================
+# SOPORTE CSV (los exports reales de MicroStrategy también vienen en CSV,
+# con encodings dispares verificados: UTF-8 con BOM, Windows cp1252 y
+# Mac OS Roman con finales de línea CR)
+# ============================================================================
+
+# Caracteres de control que rompen el parseo (se preservan \t y \n).
+_CTRL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+# Letras españolas legítimas: criterio para elegir encoding.
+_LETRAS_ES = re.compile(r"[áéíóúñüÁÉÍÓÚÑÜ]")
+
+
+def _decode_text(content: bytes) -> str:
+    """
+    Decodifica un CSV probando los encodings reales de los exports.
+
+    UTF-8 es inequívoco (si decodifica, es correcto). cp1252 y mac_roman en
+    cambio "aceptan" casi cualquier byte: un export Mac leído como cp1252
+    produce '—' donde iba 'ó', sin error. Por eso se elige la decodificación
+    que produce más letras españolas legítimas. Después se normalizan los
+    finales de línea CR (export Mac) y se eliminan caracteres de control
+    sueltos (los exports reales traían un 0x1A embebido).
+    """
+    try:
+        texto = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        candidatos = []
+        for enc in ("cp1252", "mac_roman", "latin-1"):
+            try:
+                t = content.decode(enc)
+            except UnicodeDecodeError:
+                continue
+            candidatos.append((len(_LETRAS_ES.findall(t)), t))
+        texto = max(candidatos, key=lambda c: c[0])[1]
+    texto = texto.replace("\r\n", "\n").replace("\r", "\n")
+    return _CTRL_CHARS.sub("", texto)
+
+
+def _read_csv_smart(texto: str, expected_cols: set) -> pd.DataFrame:
+    """Lee un CSV detectando separador y fila de encabezado (mismo criterio
+    que detect_header_row: la fila con más columnas esperadas)."""
+    lineas = texto.split("\n")[:10]
+    sep = max((",", ";", "\t"), key=lambda c: lineas[0].count(c))
+
+    best_row, best_matches = 0, 0
+    for i, ln in enumerate(lineas):
+        matches = len({p.strip() for p in ln.split(sep)} & set(expected_cols))
+        if matches > best_matches:
+            best_row, best_matches = i, matches
+    skiprows = best_row if best_matches >= 3 else 0
+
+    return pd.read_csv(StringIO(texto), sep=sep, skiprows=skiprows, low_memory=False)
+
+
+# ============================================================================
+# MAPEO DE COLUMNAS CRUDAS DE MICROSTRATEGY
+# ============================================================================
+
+# Cada atributo del export crudo sale como un grupo: una columna nombrada
+# ('Prestador') seguida de columnas 'Unnamed: N' (el ID y la descripción,
+# en orden que VARÍA según el reporte).
+_MSTR_GRUPOS = {
+    "Prestador": ("Prestador ID", "Prestador Desc"),
+    "Convenio": ("Convenio ID", "Convenio Desc"),
+    "Prestacion": ("Prestacion ID", "Prestacion Desc"),
+}
+
+
+def normalize_mstr_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Renombra las columnas del export CRUDO de MicroStrategy al contrato de la app.
+
+    Cuál columna del grupo trae el ID y cuál la descripción varía según el
+    reporte (verificado con exports reales: en consumo el ID va primero, en
+    valores al revés), así que se decide por contenido: ID = la mayormente
+    numérica; Desc = la de texto más largo. Si ninguna es numérica (ej: el
+    'Convenio' del consumo trae un flag, no un ID), solo se mapea la Desc y
+    el ID queda genuinamente ausente (el contrato lo reporta como faltante).
+
+    Archivos ya curados (con 'X ID'/'X Desc' presentes) pasan intactos.
+    Las columnas 'Unnamed' sobrantes (flags sin nombre) se descartan.
+    """
+    df = df.copy()
+    cols = list(df.columns)
+    rename: dict = {}
+
+    def _share_numerica(c) -> float:
+        s = df[c].dropna().astype(str).head(200)
+        return to_numeric_tolerante(s).notna().mean() if len(s) else 0.0
+
+    def _largo_medio(c) -> float:
+        s = df[c].dropna().astype(str).head(200)
+        return float(s.str.len().mean()) if len(s) else 0.0
+
+    for i, col in enumerate(cols):
+        base = str(col).strip()
+        if base not in _MSTR_GRUPOS:
+            continue
+        id_col, desc_col = _MSTR_GRUPOS[base]
+        if id_col in cols or desc_col in cols:
+            continue  # archivo ya curado: no tocar
+
+        grupo = [col]
+        j = i + 1
+        while j < len(cols) and str(cols[j]).startswith("Unnamed"):
+            grupo.append(cols[j])
+            j += 1
+        if len(grupo) < 2:
+            continue
+
+        shares = {c: _share_numerica(c) for c in grupo}
+        candidata_id = max(shares, key=shares.get)
+        if shares[candidata_id] >= 0.8:
+            rename[candidata_id] = id_col
+            restantes = [c for c in grupo if c != candidata_id]
+        else:
+            restantes = grupo  # el export no trae un ID real para este grupo
+        if restantes:
+            rename[max(restantes, key=_largo_medio)] = desc_col
+
+    if rename:
+        df = df.rename(columns=rename)
+        sobrantes = [c for c in df.columns if str(c).startswith("Unnamed")]
+        df = df.drop(columns=sobrantes)
     return df
+
+
+def load_excel_smart(file_content: bytes, expected_cols: set) -> pd.DataFrame:
+    """
+    Carga un export (xlsx o CSV) autodetectando formato, encoding y encabezado,
+    y normalizando las columnas crudas de MicroStrategy al contrato de la app.
+    """
+    if file_content[:2] == b"PK":  # firma ZIP -> xlsx
+        skiprows = detect_header_row(file_content, expected_cols)
+        df = pd.read_excel(BytesIO(file_content), skiprows=skiprows, engine="openpyxl")
+    else:  # CSV
+        texto = _decode_text(file_content)
+        df = _read_csv_smart(texto, expected_cols)
+    df.columns = df.columns.astype(str).str.strip().str.lstrip("\ufeff")
+    return normalize_mstr_columns(df)
 
 
 def missing_columns(df: pd.DataFrame, expected_cols: set) -> set:
@@ -152,15 +286,18 @@ def to_numeric_tolerante(s: pd.Series) -> pd.Series:
     pd.to_numeric tolerante con números formateados como TEXTO.
 
     Los exports reales de MicroStrategy traen valores tipo '1,130 ', '23,653 ',
-    '8,206.90' (formato US: coma = miles, punto = decimal) y '-' como vacío.
-    Un to_numeric directo los convertía a NaN y se perdían las filas. Acá se
-    quitan separadores de miles y espacios antes de coaccionar.
+    '8,206.90' (formato US: coma = miles, punto = decimal), '-' como vacío y
+    negativos contables entre paréntesis: '(5,477,196)'. Un to_numeric directo
+    los convertía a NaN y se perdían las filas. Acá se limpian antes de coaccionar.
 
     Asume formato US (el de MicroStrategy). No aplicar sobre columnas que
     pudieran venir con coma decimal.
     """
     if s.dtype == object or pd.api.types.is_string_dtype(s):
-        s = s.astype(str).str.strip().str.replace(",", "", regex=False)
+        s = s.astype(str).str.strip()
+        # Negativos contables: '(1,234)' -> '-1234'
+        s = s.str.replace(r"^\((.*)\)$", r"-\1", regex=True)
+        s = s.str.replace(",", "", regex=False)
         s = s.replace({"": None, "nan": None, "None": None, "-": None})
     return pd.to_numeric(s, errors="coerce")
 

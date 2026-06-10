@@ -216,7 +216,9 @@ def main() -> int:
     total = 0
     for tipo, ds in DATASETS.items():
         ds["dir"].mkdir(parents=True, exist_ok=True)
-        files = sorted(ds["dir"].glob("*.xlsx"))
+        # Los exports de MicroStrategy vienen como xlsx o CSV (encoding variable);
+        # load_excel_smart detecta el formato por contenido.
+        files = sorted([*ds["dir"].glob("*.xlsx"), *ds["dir"].glob("*.csv")])
         print(f"[{tipo}] {len(files)} archivo(s) en {ds['dir']}")
         for path in files:
             total += _process_file(con, tipo, ds, path, args.rebuild)
