@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.anomaly import compute_metric
+from core import ratelimit
+from core.anomaly import compute_metric, detect_structural_anomalies, parse_month
 from core.excel_utils import (
     CONSUMO_NUMERIC_COLS,
     EXPECTED_VALORES_COLS,
@@ -159,6 +160,51 @@ def test_compute_metric_precio_unitario_evita_division_por_cero():
     precio = compute_metric(df, "precio_unitario")
     assert precio[0] == 25.0          # 100 / 4
     assert np.isnan(precio[1])        # cantidad 0 -> NaN, no excepción
+
+
+def test_parse_month_acepta_espanol_y_canonico():
+    """parse_month delega en el parser único: tolera MM-YYYY y español."""
+    out = parse_month(pd.Series(["05-2026", "Mayo 2026", "banana"]))
+    assert out[0] == pd.Timestamp("2026-05-01")
+    assert out[1] == pd.Timestamp("2026-05-01")
+    assert pd.isna(out[2])
+
+
+def test_percentil_estructural_rechaza_umbral_de_zscore():
+    """Regresión: un umbral tipo z-score (2.0) aplicado al método percentil
+    marcaba ~100% de los registros como anómalos. Ahora falla ruidosamente."""
+    df = pd.DataFrame({
+        "Prestacion ID": [1, 1, 1], "Mes": ["01-2025"] * 3,
+        "Importe CM": [100.0, 110.0, 500.0], "Cantidad CM": [1, 1, 1],
+    })
+    with pytest.raises(ValueError):
+        detect_structural_anomalies(df, ["Prestacion ID", "Mes"],
+                                    method="percentile", threshold=2.0)
+    # Default por método: percentile -> 95 (no hereda el 2.0 del z-score)
+    out = detect_structural_anomalies(df, ["Prestacion ID", "Mes"],
+                                      method="percentile")
+    assert out["is_anomaly_structural"].mean() < 1.0   # no marca todo
+
+
+# ----------------------------------------------------------------------------
+# core.ratelimit — lockout de login
+# ----------------------------------------------------------------------------
+def test_ratelimit_bloquea_tras_max_intentos():
+    ratelimit.reset()
+    t0 = 1_000_000.0
+    for i in range(ratelimit.MAX_INTENTOS - 1):
+        ratelimit.registrar_fallo("usuario", ahora=t0 + i)
+    assert ratelimit.segundos_bloqueado("usuario", ahora=t0 + 10) == 0
+
+    ratelimit.registrar_fallo("usuario", ahora=t0 + 5)        # 5to fallo
+    assert ratelimit.segundos_bloqueado("usuario", ahora=t0 + 10) > 0
+    # Pasado el bloqueo, se libera
+    assert ratelimit.segundos_bloqueado(
+        "usuario", ahora=t0 + 5 + ratelimit.BLOQUEO_SEG + 1
+    ) == 0
+    # Otro usuario no se ve afectado
+    assert ratelimit.segundos_bloqueado("otro", ahora=t0 + 10) == 0
+    ratelimit.reset()
 
 
 # ----------------------------------------------------------------------------

@@ -122,8 +122,15 @@ def compute_target(df: pd.DataFrame, metric: str) -> pd.Series:
 
 def construir_panel(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     """Construye panel Prestador × Prestación × Mes con calendario completo."""
+    from core.excel_utils import normalize_month_series
+
     df = df_consumo.copy()
-    df["mes_dt"] = pd.to_datetime(df["Mes"], format="%m-%Y", errors="coerce")
+    # Parser único de meses de la app: tolera 'MM-YYYY', nombres en español
+    # ('Mayo 2026') y datetimes. Antes el formato hardcodeado descartaba en
+    # silencio TODO el dataset si el mes venía en otro formato.
+    df["mes_dt"] = pd.to_datetime(
+        normalize_month_series(df["Mes"]), format="%m-%Y", errors="coerce"
+    )
     df = df.dropna(subset=["mes_dt"])
     df["Cantidad CM"] = pd.to_numeric(df["Cantidad CM"], errors="coerce").fillna(0)
     df["Importe CM"] = pd.to_numeric(df["Importe CM"], errors="coerce").fillna(0)
@@ -250,7 +257,15 @@ def predecir_lightgbm(
     if len(df_feat) == 0:
         return pd.DataFrame()
 
-    # Convertir categóricas
+    # Convertir categóricas.
+    # LIMITACIÓN CONOCIDA (auditoría de cálculos): LightGBM mapea las
+    # categóricas por su código entero interno, que depende del set/orden de
+    # categorías. Acá se derivan del dataset actual; si difiere del set de
+    # entrenamiento, los códigos pueden no coincidir y sesgar la predicción
+    # SIN error visible. Fix definitivo: exportar desde el notebook de Colab
+    # las categorías exactas por columna (agregarlas a metricas_final.json,
+    # p.ej. "categories": {"Nomenclador": [...], ...}) y reconstruir acá con
+    # pd.Categorical(values, categories=cats_entrenamiento).
     for c in cats:
         if c in df_feat.columns:
             df_feat[c] = df_feat[c].astype("category")

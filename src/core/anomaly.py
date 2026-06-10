@@ -62,13 +62,17 @@ def compute_metric(df: pd.DataFrame, metric: Metric) -> pd.Series:
 
 def parse_month(mes_str: pd.Series) -> pd.Series:
     """
-    Convierte la columna 'Mes' (formato 'MM-YYYY') a datetime para ordenar.
+    Convierte la columna 'Mes' a datetime para ordenar.
+
+    Delega en normalize_month_series (excel_utils), el parser único de meses
+    de la app: tolera 'MM-YYYY', nombres de mes en español ('Mayo 2026', como
+    vienen los exports crudos) y datetimes.
     """
-    parsed = pd.to_datetime(mes_str, format="%m-%Y", errors="coerce")
-    # Fallback a parser genérico si el formato principal falla
-    if parsed.isna().all():
-        parsed = pd.to_datetime(mes_str, errors="coerce")
-    return parsed
+    from core.excel_utils import normalize_month_series
+
+    return pd.to_datetime(
+        normalize_month_series(mes_str), format="%m-%Y", errors="coerce"
+    )
 
 
 def build_time_series(
@@ -200,7 +204,7 @@ def detect_structural_anomalies(
     df: pd.DataFrame,
     peer_group_cols: list[str],
     method: StructuralMethod = "percentile",
-    threshold: float = 2.0,
+    threshold: float | None = None,
     metric: Metric = "precio_unitario",
 ) -> pd.DataFrame:
     """
@@ -226,6 +230,16 @@ def detect_structural_anomalies(
             * is_anomaly_structural (bool)
             * severidad_structural (float)
     """
+    # Default por método: un umbral pensado para z-score (2-3) aplicado al
+    # método percentil marcaría ~100% de los registros como anómalos.
+    if threshold is None:
+        threshold = 95.0 if method == "percentile" else 2.0
+    if method == "percentile" and not (50.0 <= threshold <= 100.0):
+        raise ValueError(
+            f"Para method='percentile' el threshold es un percentil en [50, 100] "
+            f"(recibido: {threshold}). ¿Pasaste un umbral de z-score?"
+        )
+
     result = df.copy()
     result["__metric__"] = compute_metric(result, metric)
     result = result.dropna(subset=["__metric__"])
@@ -259,26 +273,6 @@ def detect_structural_anomalies(
         result["severidad_structural"] = result["z_score_cross"].abs()
 
     return result
-
-
-# ============================================================================
-# COMBINAR AMBOS ANÁLISIS
-# ============================================================================
-def combine_analyses(
-    ts_temporal: pd.DataFrame,
-    df_structural: pd.DataFrame,
-    group_cols: list[str],
-) -> pd.DataFrame:
-    """
-    Combina los resultados de ambos análisis. Un registro es anómalo
-    bajo "ambos" solo si se marcó en los dos métodos.
-
-    Por simplicidad este hito, la UI llama los dos métodos por separado
-    y la combinación se hace a nivel display (intersección de listas de alertas).
-    Este helper queda preparado para el Hito 5 (ML).
-    """
-    # Placeholder - se implementa según necesidad específica en la UI
-    raise NotImplementedError("Combinación se hace en la capa UI por ahora")
 
 
 # ============================================================================

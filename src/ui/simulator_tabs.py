@@ -242,6 +242,7 @@ def _tab_nomenclador(df: pd.DataFrame) -> None:
             height=450,
         )
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("Se etiquetan los segmentos ≥ 5%; pasá el mouse para ver el resto.")
 
     df_display = df_agg.copy()
     df_display["Consumo Ideal"]    = df_display["Consumo Ideal"].apply(format_currency)
@@ -347,6 +348,7 @@ def _tab_megacuenta(df: pd.DataFrame) -> None:
             height=450,
         )
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("Se etiquetan los segmentos ≥ 5%; pasá el mouse para ver el resto.")
 
     df_display = df_mega.copy()
     df_display["Consumo Ideal"]    = df_display["Consumo Ideal"].apply(format_currency)
@@ -359,7 +361,31 @@ def _tab_megacuenta(df: pd.DataFrame) -> None:
 # ----------------------------------------------------------------------------
 def _tab_comparativa(df_merged: pd.DataFrame, prestador_id: int | None) -> None:
     st.subheader("Comparativa de Valores (todos los prestadores)")
-    st.info("Este análisis no se filtra por el prestador seleccionado, para permitir comparar entre prestadores.")
+    st.caption("Este análisis no se filtra por el prestador seleccionado, para permitir comparar entre prestadores.")
+
+    # Con el push-down, df_merged puede venir filtrado al prestador elegido.
+    # La carga del dataset completo es opt-in (si fuera automática, este tab
+    # la dispararía en cada rerun y anularía el beneficio del push-down).
+    if prestador_id is not None:
+        cargar_todos = st.checkbox(
+            "Cargar todos los prestadores para comparar",
+            value=False,
+            key="comp_cargar_todos",
+            help="Los datos están filtrados al prestador seleccionado. "
+                 "Activá esta opción para traer el resto (queda cacheado).",
+        )
+        if cargar_todos:
+            from core.data_loader import load_merged_completo
+
+            with st.spinner("Cargando todos los prestadores..."):
+                df_full = load_merged_completo()
+            if df_full is not None:
+                df_merged = df_full
+        else:
+            st.info(
+                "Mostrando solo el prestador seleccionado. Activá la opción de "
+                "arriba para comparar contra todos los prestadores."
+            )
 
     if "Prestacion Desc" not in df_merged.columns:
         st.info("Falta columna 'Prestacion Desc'.")

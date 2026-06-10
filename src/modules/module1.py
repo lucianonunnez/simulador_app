@@ -8,7 +8,11 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from core.data_loader import get_merged_dataset, load_consumo_and_valores
+from core.data_loader import (
+    get_merged_dataset,
+    get_prestadores_disponibles,
+    load_consumo_and_valores,
+)
 from core.simulator import apply_simulation, impact_metrics, merge_match_rate
 from ui.formatters import format_currency, format_currency_full
 from ui.simulator_controls import render_simulator_controls
@@ -112,10 +116,33 @@ def _render_metrics(total_ideal: float, total_sim: float, dif: float, pct: float
 # RENDER PRINCIPAL
 # ============================================================================
 
+def _prestador_seleccionado() -> int | None:
+    """ID del prestador elegido en el selector (estado persistente del widget),
+    o None si es 'TODOS' / aún no se eligió."""
+    label = st.session_state.get("sim_prest")
+    if not label or label == "TODOS":
+        return None
+    try:
+        return int(str(label).split(" - ")[0])
+    except (ValueError, IndexError):
+        return None
+
+
 def render() -> None:
     st.title("Módulo 1 — Simulador de Aumentos")
 
-    df_consumo, df_valores = load_consumo_and_valores()
+    # Push-down a DuckDB: si ya hay un prestador elegido y la base está
+    # disponible, se carga SOLO ese prestador (filtro en SQL) en vez de traer
+    # las tablas completas a RAM y filtrar en pandas. El selector usa el
+    # catálogo liviano para poder cambiar de prestador igual.
+    catalogo = get_prestadores_disponibles()
+    pid_previo = _prestador_seleccionado() if catalogo else None
+
+    if pid_previo is not None:
+        df_consumo, df_valores = load_consumo_and_valores(prestador_ids=[pid_previo])
+    else:
+        df_consumo, df_valores = load_consumo_and_valores()
+
     if df_consumo is None or df_valores is None:
         _render_waiting_state(df_consumo is not None, df_valores is not None)
         return
@@ -143,7 +170,7 @@ def render() -> None:
             "verificá que el tarifario corresponda al mismo prestador y período."
         )
 
-    config = render_simulator_controls(df_merged)
+    config = render_simulator_controls(df_merged, prestadores=catalogo)
 
     if config["prestador_id"] is None:
         df_scope = df_merged.copy()
@@ -282,8 +309,11 @@ def _render_negociacion(
 
 
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
-    st.info("**Esperando datos** — Subí los archivos desde el sidebar.")
+    st.info(
+        "**Esperando datos** — Abrí la sección **«Carga de datos»** del menú "
+        "izquierdo y subí los archivos (o corré `python scripts/ingest.py`)."
+    )
     st.markdown(f"""
-    - {"[cargado]" if consumo_loaded else "[pendiente]"} **Archivo de Consumo** (`consumo.xlsx`)
-    - {"[cargado]" if valores_loaded else "[pendiente]"} **Archivo de Valores** (`valores.xlsx`)
+    - {"✔ cargado" if consumo_loaded else "✘ pendiente"} — **Consumo** (xlsx/csv)
+    - {"✔ cargado" if valores_loaded else "✘ pendiente"} — **Valores** (xlsx/csv)
     """)
