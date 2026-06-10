@@ -32,6 +32,25 @@ _lgb = None
 # ============================================================================
 MODELS_DIR = Path("models")
 LAGS = [1, 2, 3]
+
+
+def _is_usable_model_file(path: Path) -> bool:
+    """
+    True si el archivo existe y NO es un puntero de Git LFS sin resolver.
+
+    Si los modelos se versionan con Git LFS y no se corrió `git lfs pull`, en
+    disco quedan punteros de texto (~130 bytes que arrancan con
+    'version https://git-lfs...'). Cargarlos con pickle/keras revienta. Este
+    chequeo permite reportarlos como NO disponibles y mostrar un mensaje claro.
+    """
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return False
+        with open(path, "rb") as f:
+            head = f.read(64)
+        return not head.startswith(b"version https://git-lfs")
+    except OSError:
+        return False
 VENTANAS_MOV = [3, 6]
 METRICS = ["importe", "precio", "cantidad"]
 MODELS = ["lightgbm", "pablo_corregido"]
@@ -334,8 +353,8 @@ def modelos_disponibles() -> dict[str, bool]:
                 path = MODELS_DIR / f"lightgbm_{metric}.txt"
             else:
                 path = MODELS_DIR / f"pablo_corregido_{metric}.keras"
-            status[key] = path.exists()
+            status[key] = _is_usable_model_file(path)
 
     # Scalers para Pablo
-    status["scalers_pablo"] = (MODELS_DIR / "scalers_pablo.pkl").exists()
+    status["scalers_pablo"] = _is_usable_model_file(MODELS_DIR / "scalers_pablo.pkl")
     return status

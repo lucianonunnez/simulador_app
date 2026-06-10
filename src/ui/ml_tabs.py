@@ -1,9 +1,9 @@
 """
 Tabs del Módulo 3 (Predicción ML):
     1. Predicción → gráfico histórico + forecast
-    2. Comparativa → LightGBM vs Pablo corregido lado a lado
-    3. Feature Importance → qué variables pesan más
-    4. Pablo original → sección museo (Opción P3)
+    2. Comparativa → LightGBM vs Red Neuronal lado a lado
+    3. Variables influyentes → qué variables pesan más
+    4. Detalle técnico → iteración de la red + corrección de data leakage
     5. Sobre los modelos → explicación técnica
 """
 
@@ -29,13 +29,21 @@ METRIC_LABEL = {
     "cantidad": "Cantidad",
 }
 
+# Nombres internos de los modelos -> etiqueta visible al usuario.
+# (Las claves internas "lightgbm"/"pablo_corregido" mapean a archivos y JSON;
+# no se tocan, solo cambia lo que ve el usuario.)
+MODEL_LABEL = {
+    "lightgbm": "LightGBM",
+    "pablo_corregido": "Red Neuronal",
+}
+
 
 def render_tabs(df_consumo: pd.DataFrame, config: dict) -> None:
     tabs = st.tabs([
         "Predicción",
         "Comparativa",
-        "Feature Importance",
-        "Pablo Original",
+        "Variables influyentes",
+        "Detalle técnico",
         "Sobre los modelos",
     ])
 
@@ -67,7 +75,7 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
 
     st.caption(
         f"Métrica: **{METRIC_LABEL[config['metric']]}** · "
-        f"Modelos: **{', '.join(config['models'])}**"
+        f"Modelos: **{', '.join(MODEL_LABEL.get(m, m) for m in config['models'])}**"
     )
 
     # Selector de modelo principal a graficar
@@ -75,7 +83,7 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
         "Modelo principal para graficar",
         config["models"],
         horizontal=True,
-        format_func=lambda x: "LightGBM" if x == "lightgbm" else "Red Neuronal (Pablo)",
+        format_func=lambda x: MODEL_LABEL.get(x, x),
     )
 
     with st.spinner(f"Generando predicciones con {modelo_principal}..."):
@@ -126,7 +134,7 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
         mode="lines+markers",
         line=dict(color="#667eea", width=2, dash="dash"),
         marker=dict(size=8, symbol="diamond"),
-        name=f"Predicción ({modelo_principal})",
+        name=f"Predicción ({MODEL_LABEL.get(modelo_principal, modelo_principal)})",
     ))
     fig.update_layout(
         title=f"{METRIC_LABEL[config['metric']]} — real vs predicho",
@@ -161,7 +169,7 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
 
     if len(config["models"]) < 2:
         st.info(
-            "Activá **ambos modelos** en el sidebar (LightGBM + Pablo corregido) "
+            "Activá **ambos modelos** en el sidebar (LightGBM + Red Neuronal) "
             "para ver la comparativa lado a lado."
         )
         return
@@ -175,7 +183,7 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
         key = f"{model_name}_{config['metric']}"
         m = metricas_all.get(key, {})
         rows.append({
-            "Modelo": "LightGBM" if model_name == "lightgbm" else "Red Neuronal (Pablo)",
+            "Modelo": MODEL_LABEL.get(model_name, model_name),
             "MAE": f"{m.get('mae', 0):,.2f}",
             "R²": f"{m.get('r2', 0):.4f}",
             "N train": f"{m.get('n_train', 0):,}",
@@ -219,7 +227,7 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
     ))
     fig.add_trace(go.Scatter(
         x=ts_pablo["mes_dt"], y=ts_pablo["pred"],
-        mode="lines+markers", name="Red Neuronal (Pablo)",
+        mode="lines+markers", name="Red Neuronal",
         line=dict(color="#9467bd", width=2, dash="dot"),
     ))
     fig.update_layout(
@@ -236,10 +244,10 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
 # TAB 3 — FEATURE IMPORTANCE
 # ============================================================================
 def _tab_feature_importance(config: dict) -> None:
-    st.subheader("Feature Importance (LightGBM)")
+    st.subheader("Variables más influyentes")
     st.caption(
         "Qué variables pesan más para predecir la métrica elegida. "
-        "Solo LightGBM lo soporta de forma interpretable."
+        "Solo el modelo LightGBM lo expone de forma interpretable."
     )
 
     df_imp = get_feature_importance(config["metric"], top_n=15)
@@ -253,7 +261,7 @@ def _tab_feature_importance(config: dict) -> None:
         x="importance",
         y="feature",
         orientation="h",
-        title=f"Top 15 features — Modelo: LightGBM {config['metric']}",
+        title=f"Top 15 variables — LightGBM ({METRIC_LABEL[config['metric']]})",
     )
     fig.update_traces(marker_color="#667eea")
     fig.update_layout(height=500)
@@ -272,17 +280,18 @@ def _tab_feature_importance(config: dict) -> None:
 
 
 # ============================================================================
-# TAB 4 — PABLO ORIGINAL (Opción P3: mostrar como museo)
+# TAB 4 — DETALLE TÉCNICO (iteración de la red neuronal)
 # ============================================================================
 def _tab_pablo_original() -> None:
-    st.subheader("Enfoque original de Pablo")
+    st.subheader("Detalle técnico de la red neuronal")
 
     st.info(
-        "Esta sección muestra el **notebook original** del primer intento de Pablo, "
-        "conservado como referencia histórica. **No se usa en producción** por el motivo explicado abajo."
+        "Esta sección documenta una **iteración inicial** de la red neuronal y la "
+        "corrección metodológica que se le aplicó. Es referencia técnica; **la app "
+        "usa la versión corregida**."
     )
 
-    st.write("### Arquitectura propuesta por Pablo")
+    st.write("### Arquitectura de la red")
     st.code("""
     # Arquitectura del modelo (Keras)
     model = Sequential([
@@ -305,33 +314,32 @@ def _tab_pablo_original() -> None:
 
     st.write("### Problema detectado: data leakage")
     st.markdown("""
-    El notebook original usaba como features **todas las columnas de todos los meses disponibles**:
+    La iteración inicial usaba como features **todas las columnas de todos los meses disponibles**:
 
     ```python
     target_col_names = ['CM Agosto 2023']
     feature_cols_names = [c for c in numeric_cols if c not in target_col_names]
     ```
 
-    El problema es que `numeric_cols` incluye **meses posteriores al target** (Septiembre 2023, Octubre 2023, ..., hasta el último mes del dataset). Es decir, el modelo usa **información del futuro** para predecir el pasado.
+    El problema es que `numeric_cols` incluye **meses posteriores al target** (Septiembre 2023, Octubre 2023, ..., hasta el último mes del dataset). Es decir, el modelo usaba **información del futuro** para predecir el pasado.
 
-    **Consecuencia:** los resultados del notebook se ven muy buenos (R² alto, MAE bajo), pero **no son reproducibles en producción** — al momento de predecir el próximo mes, naturalmente no tenemos los meses siguientes.
+    **Consecuencia:** los resultados se ven muy buenos (R² alto, MAE bajo), pero **no son reproducibles en producción** — al momento de predecir el próximo mes, naturalmente no tenemos los meses siguientes.
     """)
 
     st.write("### Cómo se corrigió para la app")
     st.markdown("""
-    En el Módulo 3 usamos la **misma arquitectura de Pablo** (`Dense(6,relu) → Dense(3,relu) → Dense(1)`)
+    En el Módulo 3 mantenemos la **misma arquitectura** (`Dense(6,relu) → Dense(3,relu) → Dense(1)`)
     pero cambiamos las features:
 
     - **Antes:** columnas de todos los meses (incluyendo futuros).
     - **Ahora:** lags (valor hace 1, 2, 3 meses), medias móviles, estacionalidad.
 
-    Esto permite que el modelo funcione para **predicciones reales** en escenarios de producción,
-    respetando la arquitectura original que Pablo propuso.
+    Esto permite que el modelo funcione para **predicciones reales** en escenarios de producción.
     """)
 
-    st.write("### Comparativa ambos enfoques")
+    st.write("### Comparativa de ambos enfoques")
     st.markdown("""
-    | Aspecto | Pablo original | Pablo corregido (en esta app) |
+    | Aspecto | Iteración inicial | Versión corregida (en esta app) |
     |---------|----------------|--------------------------------|
     | Arquitectura | `Dense(6,relu)→Dense(3,relu)→Dense(1)` | **Idéntica** |
     | Optimizer / Loss | `adam / mae` | **Idénticos** |
@@ -368,9 +376,9 @@ def _tab_sobre_modelos() -> None:
     ```
     """)
 
-    st.write("### Red Neuronal (Pablo corregido)")
+    st.write("### Red Neuronal")
     st.markdown("""
-    **Qué es:** la arquitectura propuesta originalmente por Pablo, aplicada sin data leakage.
+    **Qué es:** una red neuronal feed-forward, aplicada sin data leakage.
 
     **Arquitectura:**
     ```
@@ -385,7 +393,6 @@ def _tab_sobre_modelos() -> None:
     - Para ganar necesitaríamos una arquitectura mucho más grande + más regularización
 
     **Por qué la mantenemos:**
-    - Respeta el trabajo original de Pablo
     - Sirve como baseline de comparación
     - Permite explorar cómo escalan arquitecturas distintas con los mismos datos
     """)
@@ -408,6 +415,6 @@ def _tab_sobre_modelos() -> None:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.caption(
-        "**Tip:** los modelos se re-entrenan periódicamente con los datos "
-        "más recientes para mantener la precisión de las predicciones."
+        "**Nota:** los modelos son estáticos (entrenados una vez y cargados desde "
+        "disco). Se prevé re-entrenarlos con datos más recientes en futuras versiones."
     )

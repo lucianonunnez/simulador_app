@@ -16,11 +16,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Liviano a propósito: lint + smoke tests no necesitan TensorFlow ni el
-      # resto del stack pesado. Los módulos bajo test (core.simulator,
-      # core.anomaly, ui.formatters) solo dependen de pandas/numpy.
+      # Liviano a propósito: lint + smoke tests no necesitan TensorFlow/LightGBM
+      # (se cargan con import lazy). streamlit + pandas/numpy alcanzan para
+      # importar los módulos core/ui bajo test.
       - name: Instalar herramientas
-        run: pip install --no-cache-dir ruff pytest pandas numpy
+        run: pip install --no-cache-dir ruff pytest pandas numpy streamlit
 
       - name: Lint (ruff)
         run: ruff check src tests

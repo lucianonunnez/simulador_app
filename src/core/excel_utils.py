@@ -96,6 +96,27 @@ def missing_columns(df: pd.DataFrame, expected_cols: set) -> set:
     return set(expected_cols) - set(df.columns)
 
 
+def normalize_month_series(s: pd.Series) -> pd.Series:
+    """
+    Normaliza una columna de mes a formato canónico 'MM-YYYY' (string).
+
+    MicroStrategy/openpyxl puede entregar el mes como texto ('01-2025'),
+    datetime/Timestamp, o 'YYYY-MM-DD'. Si no se normaliza, el upsert por
+    (Prestador, Mes) puede no matchear y DUPLICAR el período, y los filtros de
+    mes de la app (que asumen 'MM-YYYY') fallan. Acá lo unificamos.
+
+    Los valores que no se pueden parsear se conservan como string (no se pierden).
+    """
+    dt = pd.to_datetime(s, format="%m-%Y", errors="coerce")
+    pendientes = dt.isna()
+    if pendientes.any():
+        # Parser genérico para datetime/Timestamp/'YYYY-MM-DD'/etc.
+        dt = dt.mask(pendientes, pd.to_datetime(s.where(pendientes), errors="coerce"))
+    canonico = dt.dt.strftime("%m-%Y")
+    # Donde no se pudo parsear, dejar el valor original (limpio) como fallback.
+    return canonico.where(dt.notna(), s.astype(str).str.strip())
+
+
 def clean_dataset(
     df: pd.DataFrame,
     numeric_cols: set,
@@ -107,6 +128,8 @@ def clean_dataset(
     - Coacciona las columnas numéricas a número (lo que no es número -> NaN).
       Así una fila de "Total" con texto en una columna numérica no rompe el
       tipado estricto de DuckDB.
+    - Normaliza las columnas de mes ('Mes' / 'Mes Vigencia') a 'MM-YYYY' para
+      que el upsert y los filtros sean consistentes (evita duplicar períodos).
     - Descarta las filas sin clave válida (key_col NaN): elimina justamente esas
       filas de Total/Subtotal de los exports de MicroStrategy.
     - Deja los IDs como enteros nullable (sin el ".0" de los floats).
@@ -116,6 +139,10 @@ def clean_dataset(
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    for mcol in (CONSUMO_MES_COL, VALORES_MES_COL):
+        if mcol in df.columns:
+            df[mcol] = normalize_month_series(df[mcol])
 
     if key_col in df.columns:
         df = df[df[key_col].notna()].reset_index(drop=True)

@@ -2,7 +2,9 @@ streamlit==1.38.0
 streamlit-authenticator==0.3.2
 bcrypt>=4.0.0
 duckdb>=1.0.0
-pandas>=2.0.0
+# pandas>=2.2 es requerido: el feature engineering usa
+# groupby(...).apply(..., include_groups=False), que solo existe desde 2.2.
+pandas>=2.2,<3
 numpy>=1.24.0
 openpyxl>=3.1.5
 plotly>=5.18.0

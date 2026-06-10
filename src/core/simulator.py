@@ -19,6 +19,9 @@ import pandas as pd
 
 MERGE_KEYS = ["Prestador ID", "Convenio ID", "Prestacion ID"]
 
+# Columna de vigencia del tarifario (histórico de tarifas por prestación).
+VALORES_MES_COL = "Mes Vigencia"
+
 
 # ============================================================================
 # NORMALIZACIÓN
@@ -57,18 +60,50 @@ def normalize_dataframes(
 # ============================================================================
 # MERGE
 # ============================================================================
+def _dedup_vigencia(df_valores: pd.DataFrame) -> pd.DataFrame:
+    """
+    Deja UNA tarifa por clave de merge: la de la vigencia más reciente.
+
+    El tarifario ('valores') tiene histórico: varias filas 'Mes Vigencia' por
+    prestación. Como el merge NO une por mes, sin esto cada fila de consumo
+    matchearía todas las vigencias -> producto cartesiano -> Consumo Ideal/Simulado
+    inflados (doble conteo). Tomamos la vigencia más reciente porque la columna de
+    interés es "Valor Convenido a HOY" (el valor vigente).
+
+    NOTA: si en el futuro se quisiera el valor histórico exacto de cada mes de
+    consumo, esto debería reemplazarse por un as-of join (vigencia <= mes consumo).
+    """
+    if VALORES_MES_COL not in df_valores.columns:
+        return df_valores
+    if not set(MERGE_KEYS).issubset(df_valores.columns):
+        return df_valores
+
+    tmp = df_valores.copy()
+    tmp["_vig_dt"] = pd.to_datetime(tmp[VALORES_MES_COL], format="%m-%Y", errors="coerce")
+    tmp = (
+        tmp.sort_values("_vig_dt", na_position="first")
+        .drop_duplicates(subset=MERGE_KEYS, keep="last")
+        .drop(columns="_vig_dt")
+    )
+    return tmp
+
+
 def merge_datasets(df_consumo: pd.DataFrame, df_valores: pd.DataFrame) -> pd.DataFrame:
     """
     Une consumo con valores usando Prestador + Convenio + Prestación.
 
     Cada fila de consumo se enriquece con el "Valor Convenido a HOY" del tarifario.
+    Se deduplica el tarifario a una vigencia por clave para evitar doble conteo.
     """
+    df_valores = _dedup_vigencia(df_valores)
+
     df_merged = pd.merge(
         df_consumo,
         df_valores,
         on=MERGE_KEYS,
         how="inner",
         suffixes=("", "_val"),
+        validate="m:1",  # cada clave del tarifario es única tras el dedup
     )
 
     # Si el merge con 3 claves no dio nada, intentar con clave concatenada
