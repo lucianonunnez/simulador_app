@@ -225,15 +225,18 @@ def _render_ingesta_pendiente() -> None:
     """
     from core import ingest_runner
 
-    # Resultado de la última ingesta (quedó pendiente de mostrar tras el rerun)
+    # Resultado de la última ingesta (quedó pendiente de mostrar tras el rerun).
+    # OJO: acá NO se puede usar st.expander — esta función se renderiza DENTRO
+    # del expander "Carga de datos" y Streamlit no permite anidarlos
+    # (StreamlitAPIException detectada con la app corriendo en real).
     if "_ingesta_resultado" in st.session_state:
         ok, salida = st.session_state.pop("_ingesta_resultado")
         if ok:
             st.success("Ingesta finalizada: archivos unificados a la base.")
         else:
             st.error("La ingesta tuvo errores (ver detalle).")
-        with st.expander("Detalle de la ingesta"):
-            st.code(salida or "(sin salida)")
+        lineas = [ln for ln in (salida or "").splitlines() if ln.strip()]
+        st.code("\n".join(lineas[-25:]) or "(sin salida)", language=None)
 
     try:
         pendientes = _pendientes_cached(
