@@ -1,7 +1,7 @@
 """
 Simulador de Costo Médico
 Entry point de la aplicación Streamlit.
-v0.5.2 — diseño Swiss Medical
+v0.6.0 — diseño Swiss Medical
 """
 
 import html
@@ -11,6 +11,8 @@ import streamlit as st
 
 from auth import require_login, render_logout, get_current_user
 from modules import module1, module2, module3
+from ui.formatters import format_int
+from ui.styles import brand_header_sidebar, inject_css
 
 # ============================================================================
 # LOGGING — antes no había NINGÚN logging en la app: un fallo en vivo no
@@ -26,168 +28,12 @@ logging.basicConfig(
 # ============================================================================
 st.set_page_config(
     page_title="Simulador Costo Médico",
-    page_icon=None,
+    page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ============================================================================
-# CSS GLOBAL — estilo Swiss Medical
-# ============================================================================
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Roboto', sans-serif !important;
-}
-
-/* ── Fondo general ── */
-.stApp { background-color: #F8F9FA; }
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"] {
-    background-color: #FFFFFF;
-    border-right: 1px solid #E9ECEF;
-}
-[data-testid="stSidebar"] * {
-    font-family: 'Roboto', sans-serif !important;
-}
-
-/* ── Títulos ── */
-h1 {
-    font-family: 'Roboto', sans-serif !important;
-    font-weight: 700 !important;
-    color: #212529 !important;
-    border-left: 4px solid #E4002B;
-    padding-left: 12px;
-}
-h2, h3 {
-    font-family: 'Roboto', sans-serif !important;
-    font-weight: 600 !important;
-    color: #212529 !important;
-}
-
-/* ── Botones primarios ── */
-.stButton > button {
-    background-color: #E4002B !important;
-    color: #FFFFFF !important;
-    border: none !important;
-    border-radius: 24px !important;
-    font-family: 'Roboto', sans-serif !important;
-    font-weight: 500 !important;
-    padding: 8px 24px !important;
-    transition: background-color 0.2s ease;
-}
-.stButton > button:hover { background-color: #B8001F !important; }
-
-/* ── Botón de descarga ── */
-[data-testid="stDownloadButton"] > button {
-    background-color: #FFFFFF !important;
-    color: #E4002B !important;
-    border: 1.5px solid #E4002B !important;
-    border-radius: 24px !important;
-    font-weight: 500 !important;
-}
-[data-testid="stDownloadButton"] > button:hover {
-    background-color: #FFF0F3 !important;
-}
-
-/* ── Expanders ── */
-[data-testid="stExpander"] {
-    background-color: #FFFFFF;
-    border: 1px solid #E9ECEF !important;
-    border-radius: 10px !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-
-/* ── TABS — sin emojis se definen en Python, aquí el estilo ── */
-[data-testid="stTabs"] [data-baseweb="tab-list"] {
-    background-color: transparent;
-    border-bottom: 2px solid #E9ECEF;
-}
-[data-testid="stTabs"] [data-baseweb="tab"] {
-    font-family: 'Roboto', sans-serif !important;
-    font-weight: 500;
-    font-size: 14px;
-    color: #797979;
-    padding: 8px 16px;
-    border-radius: 6px 6px 0 0;
-    margin-right: 4px;
-    background-color: transparent;
-    border: none;
-}
-[data-testid="stTabs"] [data-baseweb="tab"]:hover {
-    background-color: #FFF0F3;
-    color: #E4002B;
-}
-[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
-    background-color: #FFF0F3 !important;
-    color: #E4002B !important;
-    border-bottom: 2px solid #E4002B !important;
-    font-weight: 700;
-}
-
-/* ── Tablas ── */
-[data-testid="stDataFrame"] {
-    border-radius: 8px !important;
-    overflow: hidden;
-    border: 1px solid #E9ECEF;
-}
-
-/* ── Métricas nativas (fallback) ── */
-[data-testid="stMetric"] {
-    background-color: #FFFFFF;
-    border: 1px solid #E9ECEF;
-    border-radius: 10px;
-    padding: 16px !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-[data-testid="stMetricLabel"] {
-    font-size: 13px !important;
-    color: #797979 !important;
-    font-weight: 500 !important;
-}
-[data-testid="stMetricValue"] {
-    font-size: 26px !important;
-    font-weight: 700 !important;
-    color: #212529 !important;
-}
-
-/* ── Alertas ── */
-[data-testid="stAlert"] {
-    border-radius: 8px !important;
-    border-left: 4px solid #E4002B !important;
-}
-
-/* ── Divider ── */
-hr { border-color: #E9ECEF !important; }
-
-/* ── Caption ── */
-[data-testid="stCaptionContainer"] {
-    color: #797979 !important;
-    font-size: 13px !important;
-}
-
-/* ── Encabezados de tablas — fondo rosado Swiss ── */
-[data-testid="stDataFrame"] thead tr th,
-[data-testid="stDataFrame"] [data-testid="glideDataEditor"] .header-cell,
-.dvn-header,
-[role="columnheader"] {
-    background-color: #FFF0F3 !important;
-    color: #212529 !important;
-    font-weight: 600 !important;
-    font-family: 'Roboto', sans-serif !important;
-    border-bottom: 2px solid #E4002B !important;
-}
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #F8F9FA; }
-::-webkit-scrollbar-thumb { background: #CED4DA; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #797979; }
-</style>
-""", unsafe_allow_html=True)
+inject_css()
 
 # ============================================================================
 # AUTENTICACIÓN
@@ -195,8 +41,21 @@ hr { border-color: #E9ECEF !important; }
 require_login()
 
 # ============================================================================
-# APP PRINCIPAL
+# NAVEGACIÓN
 # ============================================================================
+MODULOS = [
+    "Inicio",
+    "Módulo 1 — Simulador",
+    "Módulo 2 — Desvíos",
+    "Módulo 3 — Predicción ML",
+]
+
+# Handoff de navegación: los botones de las cards de Inicio no pueden tocar
+# el estado del radio una vez instanciado, así que dejan el destino acá y se
+# aplica ANTES de renderizar el radio en el próximo run.
+if "_nav_destino" in st.session_state:
+    st.session_state["nav_modulo"] = st.session_state.pop("_nav_destino")
+
 user = get_current_user()
 # Los datos de usuario se interpolan en HTML (unsafe_allow_html): escapar
 # siempre, aunque hoy vengan de secrets.toml controlado por el admin.
@@ -204,113 +63,115 @@ _nombre = html.escape(user["name"])
 _usuario = html.escape(user["username"])
 
 with st.sidebar:
-    st.markdown(f"""
-    <div style="padding: 8px 0 16px 0;">
-        <div style="font-size:15px; font-weight:700; color:#212529;">{_nombre}</div>
-        <div style="font-size:12px; color:#797979;">Conectado como <code>{_usuario}</code></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    render_logout()
-    st.divider()
+    st.markdown(brand_header_sidebar(), unsafe_allow_html=True)
 
     st.markdown("""
-    <div style="font-size:11px; font-weight:700; color:#797979;
+    <div style="font-size:11px; font-weight:700; color:#5A5A5A;
                 letter-spacing:1px; text-transform:uppercase;
-                padding: 4px 0 8px 0;">
+                padding: 0 0 6px 0;">
         Navegación
     </div>
     """, unsafe_allow_html=True)
 
     modulo = st.radio(
         label="Módulo",
-        options=[
-            "Inicio",
-            "Módulo 1 — Simulador",
-            "Módulo 2 — Desvíos",
-            "Módulo 3 — Predicción ML",
-        ],
+        options=MODULOS,
         label_visibility="collapsed",
         key="nav_modulo",
     )
 
     st.divider()
-    st.caption("v0.5.2")
+
+    st.markdown(f"""
+    <div style="padding: 0 0 8px 0;">
+        <div style="font-size:13px; font-weight:600; color:#212529;">{_nombre}</div>
+        <div style="font-size:11px; color:#5A5A5A;">Conectado como <code>{_usuario}</code></div>
+    </div>
+    """, unsafe_allow_html=True)
+    render_logout()
+
+    st.divider()
+    st.caption("v0.6.0")
+
+# ============================================================================
+# INICIO
+# ============================================================================
+def _render_inicio() -> None:
+    from core.data_loader import resumen_base
+
+    st.title("Simulador de Costo Médico")
+    st.caption(
+        f"Bienvenido, **{_nombre}** — elegí un módulo abajo o desde el menú izquierdo."
+    )
+    st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    # ── Estado de los datos ──
+    resumen = resumen_base()
+    if resumen:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Registros de consumo", format_int(resumen["filas"]))
+        c2.metric("Prestadores", format_int(resumen["prestadores"]))
+        c3.metric("Meses cargados", format_int(resumen["meses"]))
+        c4.metric("Tarifas (valores)", format_int(resumen["tarifas"]))
+    else:
+        st.info(
+            "**Todavía no hay datos cargados.** Abrí la sección "
+            "**«Carga de datos»** del menú izquierdo: podés subir archivos o "
+            "ingerir lo que dejes en `data/raw/` con un click."
+        )
+
+    st.markdown("<div style='margin-bottom:24px'></div>", unsafe_allow_html=True)
+
+    # ── Cards de módulos (accionables) ──
+    card_style = """
+        background: #FFFFFF;
+        border: 1px solid #E9ECEF;
+        border-top: 3px solid #E4002B;
+        border-radius: 12px;
+        padding: 24px 22px 16px 22px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        min-height: 130px;
+    """
+    cards = [
+        ("Módulo 1 — Simulador",
+         "Proyección de impacto financiero por cambios de tarifas: escenarios "
+         "Solicitado vs Propuesto, Extrapauta y exclusiones No pauta."),
+        ("Módulo 2 — Desvíos",
+         "Detección de anomalías en costos por prestador, prestación o grupo, "
+         "con análisis temporal y estructural."),
+        ("Módulo 3 — Predicción ML",
+         "Pronóstico con LightGBM y red neuronal. Comparativa de modelos con "
+         "métricas de performance."),
+    ]
+
+    cols = st.columns(3)
+    for col, (titulo, desc) in zip(cols, cards):
+        with col:
+            st.markdown(f"""
+            <div style="{card_style}">
+                <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
+                    {titulo}
+                </div>
+                <div style="font-size:13px; color:#5A5A5A; line-height:1.5;">
+                    {desc}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(
+                "Abrir →", key=f"abrir_{titulo}", use_container_width=True
+            ):
+                st.session_state["_nav_destino"] = titulo
+                st.rerun()
+
 
 # ============================================================================
 # ROUTER
 # ============================================================================
 if modulo == "Inicio":
-    st.title("Simulador de Costo Médico")
-    st.markdown("<div style='margin-bottom:32px'></div>", unsafe_allow_html=True)
-
-    # Cards de módulos
-    c1, c2, c3 = st.columns(3)
-
-    card_style = """
-        background: #FFFFFF;
-        border: 1px solid #E9ECEF;
-        border-radius: 12px;
-        padding: 28px 24px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-        height: 100%;
-    """
-    accent = "border-top: 3px solid #E4002B;"
-
-    with c1:
-        st.markdown(f"""
-        <div style="{card_style}{accent}">
-            <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
-                Módulo 1 — Simulador
-            </div>
-            <div style="font-size:13px; color:#797979; line-height:1.5;">
-                Proyección de impacto financiero por cambios de tarifas.
-                Filtrá por prestador, mes y tipo de aumento.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c2:
-        st.markdown(f"""
-        <div style="{card_style}{accent}">
-            <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
-                Módulo 2 — Desvíos
-            </div>
-            <div style="font-size:13px; color:#797979; line-height:1.5;">
-                Detección de anomalías en costos por prestador,
-                prestación o grupo con análisis temporal y estructural.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        st.markdown(f"""
-        <div style="{card_style}{accent}">
-            <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
-                Módulo 3 — Predicción ML
-            </div>
-            <div style="font-size:13px; color:#797979; line-height:1.5;">
-                Pronóstico con LightGBM y red neuronal.
-                Comparativa de modelos con métricas de performance.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div style="margin-top:32px; padding:16px 20px;
-                background:#FFF0F3; border-radius:8px;
-                border-left: 3px solid #E4002B;
-                font-size:13px; color:#212529;">
-        Bienvenido, <strong>{_nombre}</strong> —
-        seleccioná un módulo en el menú de la izquierda para comenzar.
-    </div>
-    """, unsafe_allow_html=True)
-
+    _render_inicio()
 elif modulo == "Módulo 1 — Simulador":
     module1.render()
-
 elif modulo == "Módulo 2 — Desvíos":
     module2.render()
-
 elif modulo == "Módulo 3 — Predicción ML":
     module3.render()

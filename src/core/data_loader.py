@@ -170,6 +170,40 @@ def get_prestadores_disponibles() -> Optional[list]:
     return _catalogo_prestadores(_db_fingerprint())
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _resumen_base_cached(db_state: str) -> Optional[dict]:
+    """Conteos livianos (COUNT/DISTINCT en SQL) para el panel de Inicio."""
+    if not DB_PATH.exists():
+        return None
+    try:
+        con = _get_ro_connection()
+        if not table_exists(con, CONSUMO_TABLE):
+            return None
+        filas, prestadores, meses = con.execute(
+            f'SELECT COUNT(*), COUNT(DISTINCT "Prestador ID"), '
+            f'COUNT(DISTINCT "Mes") FROM "{CONSUMO_TABLE}"'
+        ).fetchone()
+        tarifas = 0
+        if table_exists(con, VALORES_TABLE):
+            tarifas = con.execute(
+                f'SELECT COUNT(*) FROM "{VALORES_TABLE}"'
+            ).fetchone()[0]
+        return {
+            "filas": int(filas),
+            "prestadores": int(prestadores),
+            "meses": int(meses),
+            "tarifas": int(tarifas),
+        }
+    except Exception:
+        logger.exception("Error consultando el resumen de la base")
+        return None
+
+
+def resumen_base() -> Optional[dict]:
+    """Estado de los datos cargados (para el panel de Inicio). None sin base."""
+    return _resumen_base_cached(_db_fingerprint())
+
+
 # ============================================================================
 # INGESTA DESDE LA APP (detectar archivos nuevos en data/raw y unificarlos)
 # ============================================================================
