@@ -20,6 +20,7 @@ from core.excel_utils import (
     CONSUMO_NUMERIC_COLS,
     clean_dataset,
     normalize_month_series,
+    to_numeric_tolerante,
 )
 from core.ml_predictor import _is_usable_model_file
 from core.simulator import apply_simulation, merge_datasets
@@ -122,6 +123,40 @@ def test_clean_dataset_normaliza_mes():
     })
     out = clean_dataset(df, CONSUMO_NUMERIC_COLS)
     assert list(out["Mes"]) == ["03-2025", "03-2025"]
+
+
+def test_normalize_month_series_meses_en_espanol():
+    """Los exports reales traen 'Mes Vigencia' como nombre de mes en español."""
+    s = pd.Series(["Mayo 2026", "Diciembre 2024", "dic. 2025", "Enero de 2024"])
+    out = normalize_month_series(s)
+    assert list(out) == ["05-2026", "12-2024", "12-2025", "01-2024"]
+
+
+def test_to_numeric_tolerante_formato_microstrategy():
+    """Números como texto con coma de miles y espacios (formato US del export)."""
+    s = pd.Series(["1,130 ", "23,653", "8,206.90", "-", "texto", 42])
+    out = to_numeric_tolerante(s)
+    assert out[0] == 1130
+    assert out[1] == 23653
+    assert out[2] == pytest.approx(8206.90)
+    assert pd.isna(out[3])   # '-' es vacío, no número
+    assert pd.isna(out[4])
+    assert out[5] == 42
+
+
+def test_clean_dataset_ids_con_coma_de_miles_no_pierden_filas():
+    """Regresión: 'Prestador ID' = '1,130 ' como texto no debe volverse NaN
+    (antes to_numeric directo lo descartaba junto con toda la fila)."""
+    df = pd.DataFrame({
+        "Prestador ID": ["1,130 ", "Total"],
+        "Mes": ["01-2025", None],
+        "Cantidad CM": ["23,653 ", "99"],
+    })
+    out = clean_dataset(df, CONSUMO_NUMERIC_COLS)
+    # La fila real sobrevive con ID numérico; la fila 'Total' se descarta.
+    assert len(out) == 1
+    assert out.loc[0, "Prestador ID"] == 1130
+    assert out.loc[0, "Cantidad CM"] == 23653
 
 
 # ----------------------------------------------------------------------------
