@@ -20,7 +20,7 @@ jobs:
       # (se cargan con import lazy). streamlit + pandas/numpy alcanzan para
       # importar los módulos core/ui bajo test.
       - name: Instalar herramientas
-        run: pip install --no-cache-dir ruff pytest pandas numpy streamlit
+        run: pip install --no-cache-dir -r requirements-dev.txt pandas numpy streamlit
 
       - name: Lint (ruff)
         run: ruff check src tests
