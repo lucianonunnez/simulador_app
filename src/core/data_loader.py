@@ -258,7 +258,12 @@ def _render_ingesta_pendiente() -> None:
 
     st.divider()
     nombres = ", ".join(pendientes[:4]) + ("…" if len(pendientes) > 4 else "")
-    st.info(f"**{len(pendientes)} archivo(s) nuevo(s)** en `data/raw/`: {nombres}")
+    st.info(
+        f"**{len(pendientes)} archivo(s) nuevo(s)**: {nombres}. "
+        "Tip: soltá los exports en `data/a_procesar/` con el período en el "
+        "nombre (`05-2026-Consumo-1584.xlsx`) y entra todo solo — lo procesado "
+        "se mueve a `data/procesado/`."
+    )
 
     # Los consumos CRUDOS no traen el período en el archivo (verificado: la
     # metadata de MicroStrategy solo guarda la ruta del reporte y la fecha de

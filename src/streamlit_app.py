@@ -6,6 +6,7 @@ v0.6.0 — diseño Swiss Medical
 
 import html
 import logging
+from pathlib import Path
 
 import streamlit as st
 
@@ -28,7 +29,7 @@ logging.basicConfig(
 # ============================================================================
 st.set_page_config(
     page_title="Simulador Costo Médico",
-    page_icon="src/ui/assets/favicon.png",  # isotipo Swiss Medical
+    page_icon=str(Path(__file__).parent / "ui" / "assets" / "favicon.png"),  # isotipo Swiss
     layout="wide",
     initial_sidebar_state="expanded",
 )
