@@ -128,6 +128,30 @@ def test_apply_simulation_monto_pisa_al_pct_en_misma_prestacion():
     assert out.loc[0, "Valor Ofrecido"] == pytest.approx(130.0)
 
 
+def test_apply_simulation_capas_precedencia():
+    """Flujo en capas: general < grupo < prestación % < prestación $.
+    Cada capa pisa a la anterior solo donde aplica."""
+    df = pd.DataFrame({
+        "Prestador ID": [1, 1, 1, 1],
+        "Convenio ID": [1, 1, 1, 1],
+        "Prestacion ID": [10, 20, 30, 40],
+        "Nomenclador": ["Lab", "Lab", "Consultas", "Consultas"],
+        "Cantidad CM": [1, 1, 1, 1],
+        "Valor Convenido a HOY": [100.0, 100.0, 100.0, 100.0],
+    })
+    out = apply_simulation(
+        df, months=1, mode="capas",
+        flat_pct=10.0,                     # general: +10%
+        nomenclador_pcts={"Lab": 20.0},    # grupo Lab: +20%
+        prestacion_pcts={20: 50.0},        # prestación 20: +50% (pisa al grupo)
+        prestacion_valores={40: 500.0},    # prestación 40: monto $ (pisa todo)
+    ).set_index("Prestacion ID")
+    assert out.loc[10, "Valor Ofrecido"] == pytest.approx(120.0)   # grupo Lab
+    assert out.loc[20, "Valor Ofrecido"] == pytest.approx(150.0)   # prestación % pisa grupo
+    assert out.loc[30, "Valor Ofrecido"] == pytest.approx(110.0)   # solo general
+    assert out.loc[40, "Valor Ofrecido"] == pytest.approx(500.0)   # monto $ pisa todo
+
+
 def test_merge_separa_valor_por_ambito_internacion_vs_ambulatorio():
     """Una misma prestación con distinto valor en Internación vs Ambulatorio:
     si AMBOS lados traen 'Tipo Clase CM', el merge conserva los dos valores."""

@@ -59,12 +59,6 @@ MODULOS = [
     "Módulo 3 — Predicción ML",
 ]
 
-# Handoff de navegación: los botones de las cards de Inicio no pueden tocar
-# el estado del radio una vez instanciado, así que dejan el destino acá y se
-# aplica ANTES de renderizar el radio en el próximo run.
-if "_nav_destino" in st.session_state:
-    st.session_state["nav_modulo"] = st.session_state.pop("_nav_destino")
-
 user = get_current_user()
 # Los datos de usuario se interpolan en HTML (unsafe_allow_html): escapar
 # siempre, aunque hoy vengan de secrets.toml controlado por el admin.
@@ -110,7 +104,7 @@ def _render_inicio() -> None:
 
     st.title("Simulador de Costo Médico")
     st.caption(
-        f"Bienvenido, **{_nombre}** — elegí un módulo abajo o desde el menú izquierdo."
+        f"Bienvenido, **{_nombre}** — elegí un módulo desde el menú de la izquierda."
     )
     st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
 
@@ -166,11 +160,6 @@ def _render_inicio() -> None:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            if st.button(
-                "Abrir →", key=f"abrir_{titulo}", use_container_width=True
-            ):
-                st.session_state["_nav_destino"] = titulo
-                st.rerun()
 
 
 # ============================================================================
