@@ -14,7 +14,7 @@ from core.data_loader import (
     get_prestadores_disponibles,
     load_consumo_and_valores,
 )
-from core.simulator import apply_simulation, impact_metrics, merge_coverage
+from core.simulator import apply_simulation, impact_metrics
 from ui.formatters import format_currency, format_currency_full, format_int
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -41,7 +41,8 @@ def _tabla_negociacion(df_simulated: pd.DataFrame) -> pd.DataFrame:
 @st.cache_data(show_spinner=False, max_entries=50,
                hash_funcs={pd.DataFrame: df_fingerprint})
 def _apply_simulation_cached(
-    df_scope, mode, flat_pct, nomenclador_pcts, prestacion_pcts
+    df_scope, mode, flat_pct, nomenclador_pcts, prestacion_pcts,
+    prestacion_valores=None,
 ):
     """
     Wrapper cacheado de apply_simulation.
@@ -64,6 +65,7 @@ def _apply_simulation_cached(
         flat_pct=flat_pct,
         nomenclador_pcts=nomenclador_pcts,
         prestacion_pcts=prestacion_pcts,
+        prestacion_valores=prestacion_valores,
     )
 
 
@@ -176,25 +178,6 @@ def render() -> None:
 
     st.caption(f"Datos listos · **{format_int(len(df_merged))}** registros")
 
-    # El inner join descarta en silencio el consumo sin tarifa. La cobertura
-    # se mide por filas Y por importe: en la base real el 2% de filas sin
-    # tarifa concentraba el 27% del dinero (Medicamentos / "No Asignado" —
-    # el universo "No pauta" del negocio), y la métrica por filas lo ocultaba.
-    cob = merge_coverage(df_consumo, df_merged)
-    if cob["filas"] < 0.9 or (cob["importe"] is not None and cob["importe"] < 0.95):
-        detalle_importe = ""
-        if cob["importe"] is not None:
-            detalle_importe = (
-                f" y el **{cob['importe']:.0%} del importe** "
-                f"({format_currency(cob['importe_sin_tarifa'])} quedan FUERA de la simulación — "
-                "típicamente Medicamentos / 'No Asignado', el universo No pauta)"
-            )
-        st.warning(
-            f"Cobertura de tarifas: el **{cob['filas']:.0%}** de las filas de consumo "
-            f"encontró tarifa{detalle_importe}. Los totales representan solo la "
-            "porción con tarifa — revisá el tarifario si esperabas cobertura completa."
-        )
-
     config = render_simulator_controls(df_merged, prestadores=catalogo)
 
     if config["prestador_id"] is None:
@@ -233,6 +216,7 @@ def render() -> None:
         config["flat_pct"],
         config["nomenclador_pcts"],
         config["prestacion_pcts"],
+        config["prestacion_valores"],
     )
 
     n_meses      = len(meses_raw) if meses_raw else "todos"

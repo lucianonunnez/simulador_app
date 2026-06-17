@@ -22,6 +22,16 @@ MERGE_KEYS = ["Prestador ID", "Convenio ID", "Prestacion ID"]
 # Columna de vigencia del tarifario (histórico de tarifas por prestación).
 VALORES_MES_COL = "Mes Vigencia"
 
+# Ámbito de la prestación (Internación / Ambulatorio). Una MISMA prestación
+# puede tener distinto valor según el ámbito (hallazgo de la simulación real
+# del Hospital Italiano: "una prestación puede tener distinto valor en
+# internación vs ambulatorio, y no sale lo mismo"). Cuando tanto el consumo
+# como el tarifario traen esta columna, se suma a la clave de merge para no
+# colapsar los dos valores en uno. Si el tarifario NO la trae (caso actual:
+# el export de valores no incluye el ámbito), el merge se comporta igual que
+# antes — es un agregado retrocompatible.
+AMBITO_COL = "Tipo Clase CM"
+
 
 # ============================================================================
 # NORMALIZACIÓN
@@ -98,10 +108,30 @@ def _dedup_vigencia(df_valores: pd.DataFrame, keys: list[str] | None = None) -> 
     return tmp
 
 
+def _con_ambito(
+    keys: list[str], df_consumo: pd.DataFrame, df_valores: pd.DataFrame
+) -> list[str]:
+    """
+    Agrega 'Tipo Clase CM' a la clave de merge cuando AMBOS lados lo traen.
+
+    Así una prestación que vale distinto en Internación vs Ambulatorio conserva
+    sus dos valores en vez de colapsar a uno. Si el tarifario no trae el ámbito
+    (caso actual), devuelve las claves sin tocar -> merge retrocompatible.
+    """
+    if (
+        AMBITO_COL not in keys
+        and AMBITO_COL in df_consumo.columns
+        and AMBITO_COL in df_valores.columns
+    ):
+        return keys + [AMBITO_COL]
+    return keys
+
+
 def _merge_una_pasada(
     df_consumo: pd.DataFrame, df_valores: pd.DataFrame, keys: list[str]
 ) -> pd.DataFrame:
     """Merge inner con el tarifario deduplicado a una vigencia por clave."""
+    keys = _con_ambito(keys, df_consumo, df_valores)
     v = _dedup_vigencia(df_valores, keys)
     return pd.merge(
         df_consumo,
@@ -209,6 +239,7 @@ def apply_simulation(
     flat_pct: float = 0.0,
     nomenclador_pcts: Dict[str, float] | None = None,
     prestacion_pcts: Dict[int, float] | None = None,
+    prestacion_valores: Dict[int, float] | None = None,
 ) -> pd.DataFrame:
     """
     Aplica aumentos y calcula Consumo Ideal vs Simulado.
@@ -228,9 +259,17 @@ def apply_simulation(
             infla 12x. Validado contra simulaciones reales del negocio:
             months=1 reproduce el "Impacto anual" con desvío 0.0000%.
         mode: "plano", "por_nomenclador" o "por_prestacion".
-        flat_pct: usado cuando mode="plano".
+        flat_pct: usado cuando mode="plano". En "por_prestacion" es el aumento
+            PLANO base que reciben todas las prestaciones que no se ajustan
+            individualmente (el "resto").
         nomenclador_pcts: dict {nomenclador: %} cuando mode="por_nomenclador".
         prestacion_pcts: dict {prestacion_id: %} cuando mode="por_prestacion".
+            Override en % sobre el valor actual, por prestación.
+        prestacion_valores: dict {prestacion_id: $} cuando mode="por_prestacion".
+            Override por MONTO absoluto: fija el Valor Ofrecido de esa prestación
+            (el prestador propone un valor en $, no un %). Pisa al % si ambos
+            están para la misma prestación. Réplica del proceso real: cada
+            prestación puede pedir un %, un monto $, o quedar en el plano base.
 
     Returns:
         DataFrame con columnas nuevas: Consumo Ideal, Valor Ofrecido,
@@ -254,12 +293,18 @@ def apply_simulation(
             )
 
     elif mode == "por_prestacion":
-        df["Valor Ofrecido"] = df["Valor Convenido a HOY"].copy()
+        # 1) Plano base para TODAS las prestaciones (el "resto" que no se ajusta).
+        df["Valor Ofrecido"] = df["Valor Convenido a HOY"] * (1 + flat_pct / 100)
+        # 2) Override en % sobre el valor actual, por prestación.
         for pid, pct in (prestacion_pcts or {}).items():
             mask = df["Prestacion ID"] == pid
             df.loc[mask, "Valor Ofrecido"] = (
                 df.loc[mask, "Valor Convenido a HOY"] * (1 + pct / 100)
             )
+        # 3) Override por MONTO $ absoluto (pisa el % si coincide la prestación).
+        for pid, val in (prestacion_valores or {}).items():
+            mask = df["Prestacion ID"] == pid
+            df.loc[mask, "Valor Ofrecido"] = val
     else:
         raise ValueError(f"Modo desconocido: {mode}")
 

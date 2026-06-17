@@ -458,6 +458,26 @@ def _tab_comparativa(df_merged: pd.DataFrame, prestador_id: int | None) -> None:
         st.info("Sin datos para esta prestación")
         return
 
+    # ── Selección de prestadores a comparar ──
+    # Por defecto se comparan TODOS los que ofrecen esta prestación; el usuario
+    # puede acotar a un subconjunto (p. ej. comparar solo contra prestadores de
+    # la misma coordinación / similares).
+    prest_disp = sorted(df_comp["Prestador Desc"].dropna().unique().astype(str).tolist())
+    prest_sel = st.multiselect(
+        "Prestadores a comparar",
+        options=prest_disp,
+        default=prest_disp,
+        key="comp_prestadores",
+        placeholder="Seleccioná los prestadores a comparar...",
+        help="Por defecto se comparan todos los que ofrecen esta prestación. "
+             "Acotá la lista para comparar solo contra prestadores similares.",
+    )
+    if prest_sel:
+        df_comp = df_comp[df_comp["Prestador Desc"].astype(str).isin(prest_sel)]
+    if len(df_comp) == 0:
+        st.info("Seleccioná al menos un prestador para comparar.")
+        return
+
     df_group = df_comp.groupby("Prestador Desc").agg({
         "Valor Convenido a HOY": "mean",
         "Cantidad CM":           "sum",
