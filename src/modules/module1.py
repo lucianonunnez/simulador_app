@@ -240,9 +240,9 @@ def render() -> None:
 
     # ── Métricas de negociación (doble escenario / extrapauta, modo plano) ──
     metrics_prop = None
-    if config["flat_pct_propuesto"] is not None and config["mode"] == "plano":
+    if config["flat_pct_propuesto"] is not None:
         df_sim_prop = _apply_simulation_cached(
-            df_simulable, "plano", config["flat_pct_propuesto"], {}, {},
+            df_simulable, "plano", config["flat_pct_propuesto"], {}, {}, {},
         )
         metrics_prop = impact_metrics(df_sim_prop, config["pauta_pct"], n_meses_num)
 
@@ -289,7 +289,7 @@ def _render_negociacion(
     st.caption(" · ".join(notas))
 
     rows = []
-    escenarios = [(f"Solicitado ({config['flat_pct']:.1f}%)", metrics_sol)]
+    escenarios = [(f"Solicitado (general {config['flat_pct']:.1f}%)", metrics_sol)]
     if metrics_prop is not None:
         escenarios.append(
             (f"Propuesto ({config['flat_pct_propuesto']:.1f}%)", metrics_prop)

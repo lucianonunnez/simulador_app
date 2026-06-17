@@ -1,9 +1,13 @@
 """
 Controles del simulador — renderizados inline en el cuerpo principal.
 
-- Fila 1: Prestador | Tipo de Aumento (horizontal)
+- Fila 1: Prestador
 - Fila 2: Multiselect de meses reales del dataset
-- Expander: Inputs de % según el modo elegido
+- Expander "Definir el aumento": flujo en CAPAS (sin modo excluyente):
+    1) aumento general (%), 2) ajustes por grupo (opcional),
+    3) ajustes por prestación en % o $ (opcional).
+  Precedencia: prestación > grupo > general.
+- Expander "Exclusiones — No pauta"
 """
 
 from __future__ import annotations
@@ -39,29 +43,20 @@ def _parse_meses(df_merged: pd.DataFrame) -> dict[str, str]:
     return {k: v[2] for k, v in resultado_ordenado.items()}
 
 
-def _render_por_prestacion(df_scope: pd.DataFrame, config: dict) -> None:
+def _render_ajustes_prestacion(df_scope: pd.DataFrame, config: dict, base: float) -> None:
     """
-    Interfaz de aumento MIXTO por prestación.
+    Capa de ajustes puntuales por prestación (parte del flujo en capas).
 
-    Replica el proceso real de negociación: un prestador con N prestaciones puede
-    pedir un **%** en algunas, proponer un **monto $** en otras, y dejar el resto
-    en un aumento **plano** (definido por nosotros). La idea de la revisión:
-    "selecciono prestación A, le cargo % o $ propuesto, y veo cómo se modifica;
-    luego la B, y así".
+    Un prestador con N prestaciones puede pedir un **%** en algunas, proponer un
+    **monto $** en otras, y dejar el resto en el aumento general. La idea de la
+    revisión: "selecciono prestación A, le cargo % o $ propuesto, y veo cómo se
+    modifica; luego la B, y así".
 
-    Llena en `config`:
-      - flat_pct          → el plano base para el "resto" (no ajustadas).
+    `base` es el aumento general (capa 1): se usa como valor inicial de cada
+    fila. Llena en `config`:
       - prestacion_pcts    → {pid: %}  para las ajustadas por porcentaje.
       - prestacion_valores → {pid: $}  para las ajustadas por monto absoluto.
     """
-    base = st.number_input(
-        "Aumento plano para el resto (%)",
-        min_value=-100.0, max_value=500.0, value=15.0, step=0.5,
-        key="sim_prest_base",
-        help="Lo reciben todas las prestaciones que NO ajustes individualmente abajo.",
-    )
-    config["flat_pct"] = base
-
     # Catálogo de prestaciones del scope con su valor actual representativo.
     prests_all = (
         df_scope.groupby("Prestacion ID", dropna=True)
@@ -87,11 +82,12 @@ def _render_por_prestacion(df_scope: pd.DataFrame, config: dict) -> None:
         placeholder="Escribí para buscar y seleccionar prestaciones...",
         key="sim_prest_multi",
         help="Cada prestación elegida puede recibir un % o un monto $ propio. "
-             "Las no elegidas usan el plano base de arriba.",
+             "Las no elegidas usan el aumento general (o el de su grupo).",
     )
 
     st.caption(
-        f"Las prestaciones **no seleccionadas** usan el plano base de **{base:.1f}%**. "
+        f"Las prestaciones **no seleccionadas** usan el aumento general de **{base:.1f}%** "
+        "(o el de su grupo, si lo ajustaste). "
         "Para cada seleccionada: elegí **Tipo** (% o $) y cargá el **Valor**."
     )
 
@@ -184,9 +180,8 @@ def render_simulator_controls(
     """
     config = {}
 
-    # ── Fila 1: Prestador + Tipo de Aumento ──
-    col_prest, col_modo = st.columns([4, 4])
-
+    # ── Fila 1: Prestador ──
+    col_prest, _ = st.columns([1, 1])
     with col_prest:
         if prestadores:
             labels = [f"{int(pid)} - {desc}" for pid, desc in prestadores]
@@ -201,19 +196,9 @@ def render_simulator_controls(
         options  = ["TODOS"] + labels
         selected = st.selectbox("Prestador", options, key="sim_prest")
 
-    with col_modo:
-        mode_label = st.radio(
-            "Tipo de aumento",
-            ["Igual para todo", "Por grupo de prácticas", "Detallado por prestación (% o $)"],
-            horizontal=True, key="sim_mode",
-        )
-
     config["prestador_id"] = None if selected == "TODOS" else int(selected.split(" - ")[0])
-    config["mode"] = {
-        "Igual para todo": "plano",
-        "Por grupo de prácticas": "por_nomenclador",
-        "Detallado por prestación (% o $)": "por_prestacion",
-    }[mode_label]
+    # Flujo único en capas (sin "modo" excluyente): general + ajustes opcionales.
+    config["mode"] = "capas"
 
     # ── Fila 2: Meses ──
     meses_dict = _parse_meses(df_merged)
@@ -242,72 +227,91 @@ def render_simulator_controls(
     config["prestacion_valores"] = {}
     config["excluidas"]          = []
 
-    # ── Expander: Definir Aumentos ──
-    with st.expander("Definir Aumentos", expanded=True):
+    # ── Expander: Definir el aumento (flujo en capas) ──
+    with st.expander("Definir el aumento", expanded=True):
 
-        # ------------------------------------------------------------------ PLANO
-        if config["mode"] == "plano":
-            config["flat_pct"] = st.number_input(
-                "Aumento Solicitado (%)", min_value=-100.0, max_value=500.0,
-                value=15.0, step=0.5, key="sim_flat_pct",
-                help="Escenario principal: el % de aumento pedido.",
+        # ── Capa 1: Aumento general (siempre) ─────────────────────────────
+        st.markdown("**1. Aumento general**")
+        general = st.number_input(
+            "Aumento general (%)", min_value=-100.0, max_value=500.0,
+            value=15.0, step=0.5, key="sim_flat_pct",
+            help="El % base que reciben TODAS las prestaciones. Después podés "
+                 "refinar por grupo o por prestación abajo (opcional).",
+        )
+        config["flat_pct"] = general
+
+        c_prop, c_pauta = st.columns(2)
+        with c_prop:
+            usar_prop = st.checkbox(
+                "Comparar con escenario Propuesto",
+                key="sim_usar_prop",
+                help="Simula además un segundo % (la contraoferta) y "
+                     "muestra ambos impactos lado a lado.",
             )
-
-            c_prop, c_pauta = st.columns(2)
-            with c_prop:
-                usar_prop = st.checkbox(
-                    "Comparar con escenario Propuesto",
-                    key="sim_usar_prop",
-                    help="Simula además un segundo % (la contraoferta) y "
-                         "muestra ambos impactos lado a lado.",
+            if usar_prop:
+                config["flat_pct_propuesto"] = st.number_input(
+                    "Aumento Propuesto (%)", min_value=-100.0, max_value=500.0,
+                    value=10.0, step=0.5, key="sim_prop_pct",
                 )
-                if usar_prop:
-                    config["flat_pct_propuesto"] = st.number_input(
-                        "Aumento Propuesto (%)", min_value=-100.0, max_value=500.0,
-                        value=10.0, step=0.5, key="sim_prop_pct",
-                    )
-            with c_pauta:
-                usar_pauta = st.checkbox(
-                    "Pauta de referencia (Extrapauta)",
-                    key="sim_usar_pauta",
-                    help="% autorizado de referencia. El Extrapauta mide cuánto "
-                         "excede cada escenario a esa pauta.",
-                )
-                if usar_pauta:
-                    config["pauta_pct"] = st.number_input(
-                        "Pauta (%)", min_value=-100.0, max_value=500.0,
-                        value=2.0, step=0.1, key="sim_pauta_pct",
-                    )
-
-        # -------------------------------------------------------- POR NOMENCLADOR
-        elif config["mode"] == "por_nomenclador":
-            base = st.number_input(
-                "Aumento Base (%)", min_value=-100.0, max_value=500.0,
-                value=15.0, step=0.5, key="sim_nom_base",
+        with c_pauta:
+            usar_pauta = st.checkbox(
+                "Pauta de referencia (Extrapauta)",
+                key="sim_usar_pauta",
+                help="% autorizado de referencia. El Extrapauta mide cuánto "
+                     "excede cada escenario a esa pauta.",
             )
-            noms   = sorted(df_scope["Nomenclador"].dropna().unique())
-            n_cols = min(len(noms), 4)
-            cols   = st.columns(n_cols)
-            for i, nom in enumerate(noms):
-                with cols[i % n_cols]:
-                    # Label visible, sin botones +/-
-                    st.markdown(
-                        f"<div style='font-size:12px; color:#212529; font-weight:500; "
-                        f"margin-bottom:2px;'>{str(nom)[:28]}</div>",
-                        unsafe_allow_html=True,
-                    )
-                    pct = st.number_input(
-                        label=str(nom),
-                        min_value=-100.0, max_value=500.0,
-                        value=base, step=0.5,
-                        key=f"nom_{nom}",
-                        label_visibility="collapsed",
-                    )
-                    config["nomenclador_pcts"][nom] = pct
+            if usar_pauta:
+                config["pauta_pct"] = st.number_input(
+                    "Pauta (%)", min_value=-100.0, max_value=500.0,
+                    value=2.0, step=0.1, key="sim_pauta_pct",
+                )
 
-        # -------------------------------------------------------- POR PRESTACIÓN
-        elif config["mode"] == "por_prestacion":
-            _render_por_prestacion(df_scope, config)
+        st.divider()
+
+        # ── Capa 2: Ajustes por grupo de prácticas (opcional) ─────────────
+        st.markdown("**2. Ajustes por grupo de prácticas** · _opcional_")
+        usar_grupo = st.checkbox(
+            "Asignar un % distinto a ciertos grupos",
+            key="sim_usar_grupo",
+            help="Los grupos (nomencladores) que NO ajustes acá usan el aumento general.",
+        )
+        if usar_grupo:
+            noms = sorted(df_scope["Nomenclador"].dropna().unique().astype(str).tolist())
+            grupos_sel = st.multiselect(
+                "Grupos a ajustar",
+                options=noms, default=[],
+                placeholder="Elegí los grupos (nomencladores) a ajustar...",
+                key="sim_grupos_multi",
+            )
+            if grupos_sel:
+                cols = st.columns(min(len(grupos_sel), 3))
+                for i, nom in enumerate(grupos_sel):
+                    with cols[i % len(cols)]:
+                        st.markdown(
+                            f"<div style='font-size:12px; color:#212529; font-weight:500; "
+                            f"margin-bottom:2px;'>{nom[:28]}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        pct = st.number_input(
+                            label=nom,
+                            min_value=-100.0, max_value=500.0,
+                            value=general, step=0.5,
+                            key=f"grp_{nom}",
+                            label_visibility="collapsed",
+                        )
+                        config["nomenclador_pcts"][nom] = pct
+
+        st.divider()
+
+        # ── Capa 3: Ajustes por prestación, % o $ (opcional) ──────────────
+        st.markdown("**3. Ajustes por prestación (% o $)** · _opcional_")
+        usar_prest = st.checkbox(
+            "Cargar un % o monto $ propio en prestaciones puntuales",
+            key="sim_usar_prest",
+            help="La capa más detallada: pisa al general y al grupo en esas prestaciones.",
+        )
+        if usar_prest:
+            _render_ajustes_prestacion(df_scope, config, general)
 
     # ── Expander: Exclusiones (No pauta) ──
     with st.expander("Exclusiones — No pauta", expanded=False):

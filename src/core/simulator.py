@@ -229,7 +229,7 @@ def merge_coverage(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> dict:
 # ============================================================================
 # SIMULACIÓN DE AUMENTOS
 # ============================================================================
-IncreaseMode = Literal["plano", "por_nomenclador", "por_prestacion"]
+IncreaseMode = Literal["plano", "por_nomenclador", "por_prestacion", "capas"]
 
 
 def apply_simulation(
@@ -258,10 +258,12 @@ def apply_simulation(
             del negocio, p.ej. 12 meses), debe ser 1 — con 12 el impacto se
             infla 12x. Validado contra simulaciones reales del negocio:
             months=1 reproduce el "Impacto anual" con desvío 0.0000%.
-        mode: "plano", "por_nomenclador" o "por_prestacion".
-        flat_pct: usado cuando mode="plano". En "por_prestacion" es el aumento
-            PLANO base que reciben todas las prestaciones que no se ajustan
-            individualmente (el "resto").
+        mode: "plano", "por_nomenclador", "por_prestacion" o "capas".
+            "capas" combina las tres en un solo flujo con precedencia
+            (general < grupo < prestación % < prestación $) — es el que usa la UI.
+        flat_pct: usado cuando mode="plano". En "por_prestacion" y "capas" es el
+            aumento general/base que reciben todas las prestaciones que no se
+            ajustan por grupo ni individualmente (el "resto").
         nomenclador_pcts: dict {nomenclador: %} cuando mode="por_nomenclador".
         prestacion_pcts: dict {prestacion_id: %} cuando mode="por_prestacion".
             Override en % sobre el valor actual, por prestación.
@@ -302,6 +304,30 @@ def apply_simulation(
                 df.loc[mask, "Valor Convenido a HOY"] * (1 + pct / 100)
             )
         # 3) Override por MONTO $ absoluto (pisa el % si coincide la prestación).
+        for pid, val in (prestacion_valores or {}).items():
+            mask = df["Prestacion ID"] == pid
+            df.loc[mask, "Valor Ofrecido"] = val
+
+    elif mode == "capas":
+        # Flujo en CAPAS, con precedencia de MENOR a MAYOR (cada capa pisa a la
+        # anterior donde aplica):
+        #   1) general (flat_pct)         -> base para todas las prestaciones
+        #   2) grupo (nomenclador_pcts)   -> % distinto para ciertos nomencladores
+        #   3) prestación % (prestacion_pcts)
+        #   4) prestación $ (prestacion_valores) -> monto absoluto, la más fuerte
+        # Así una prestación toma su ajuste propio si lo tiene; si no, el de su
+        # grupo; y si tampoco, el general. Es el modelo real de negociación.
+        df["Valor Ofrecido"] = df["Valor Convenido a HOY"] * (1 + flat_pct / 100)
+        for nom, pct in (nomenclador_pcts or {}).items():
+            mask = df["Nomenclador"] == nom
+            df.loc[mask, "Valor Ofrecido"] = (
+                df.loc[mask, "Valor Convenido a HOY"] * (1 + pct / 100)
+            )
+        for pid, pct in (prestacion_pcts or {}).items():
+            mask = df["Prestacion ID"] == pid
+            df.loc[mask, "Valor Ofrecido"] = (
+                df.loc[mask, "Valor Convenido a HOY"] * (1 + pct / 100)
+            )
         for pid, val in (prestacion_valores or {}).items():
             mask = df["Prestacion ID"] == pid
             df.loc[mask, "Valor Ofrecido"] = val
