@@ -150,6 +150,22 @@ def _prestador_seleccionado() -> int | None:
 def render() -> None:
     st.title("Módulo 1 — Simulador de Aumentos")
 
+    # ── Anti-"fantasma" de la página anterior ──
+    # Al navegar, Streamlit muestra grisado el frame previo (el Inicio) hasta que
+    # el contenido nuevo lo reemplaza. La primera carga (cientos de miles de
+    # filas + merge) tarda, así que durante esa ventana se veían las "sombras"
+    # del Inicio. Un placeholder que ocupa el alto del viewport, renderizado
+    # ANTES de la carga, empuja ese contenido stale fuera de vista; se limpia
+    # apenas hay datos. En reruns con caché la carga es instantánea, así que el
+    # placeholder no llega a pintarse (no parpadea en cada interacción).
+    cargando = st.empty()
+    cargando.markdown(
+        "<div style='min-height:80vh; display:flex; align-items:center; "
+        "justify-content:center; color:#797979; font-size:15px; "
+        "letter-spacing:.3px;'>Cargando datos del simulador…</div>",
+        unsafe_allow_html=True,
+    )
+
     # Push-down a DuckDB: si ya hay un prestador elegido y la base está
     # disponible, se carga SOLO ese prestador (filtro en SQL) en vez de traer
     # las tablas completas a RAM y filtrar en pandas. El selector usa el
@@ -163,6 +179,7 @@ def render() -> None:
         df_consumo, df_valores = load_consumo_and_valores()
 
     if df_consumo is None or df_valores is None:
+        cargando.empty()
         _render_waiting_state(df_consumo is not None, df_valores is not None)
         return
 
@@ -170,12 +187,14 @@ def render() -> None:
     # así no reaparece el indicador de progreso en cada interacción.
     df_merged = get_merged_dataset(df_consumo, df_valores)
     if df_merged is None or len(df_merged) == 0:
+        cargando.empty()
         st.error(
             "No se encontraron coincidencias entre Consumo y Valores. "
             "Revisá que las claves (Prestador / Convenio / Prestación) coincidan."
         )
         return
 
+    cargando.empty()
     st.caption(f"Datos listos · **{format_int(len(df_merged))}** registros")
 
     config = render_simulator_controls(df_merged, prestadores=catalogo)
