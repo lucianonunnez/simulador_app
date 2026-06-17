@@ -172,3 +172,57 @@ requieren decisión de producto):
 - **No trae `Convenio ID`** (la columna `Convenio` trae un flag, no el ID).
   Pendiente: definir estrategia de merge (por `Convenio Desc`, o degradar a
   Prestador + Prestación resolviendo la vigencia más reciente).
+
+---
+
+## 10. 🏥 Internación: módulos día y valor por ámbito
+
+Hallazgos de la revisión y de la simulación real del **Hospital Italiano**
+(`Simulación Hospital Italiano jun26`), que conviene tener en cuenta al modelar:
+
+### 10.1 Una prestación puede valer distinto según el ámbito
+La **misma prestación** puede tener **distinto valor en Internación vs
+Ambulatorio** ("no sale lo mismo"). El consumo distingue el ámbito en la
+columna **`Tipo Clase CM`** (`Internación` / `Ambulatorio`), pero el export
+de **valores** (tarifario) **hoy NO la trae**, así que ambos ámbitos comparten
+el mismo valor.
+
+- **Hecho (retrocompatible):** el merge (`core/simulator.merge_datasets`) ahora
+  **suma `Tipo Clase CM` a la clave** cuando **ambos** lados la traen. Con los
+  datos actuales (valores sin ámbito) el comportamiento es idéntico al de antes;
+  cuando el tarifario empiece a traer el ámbito, cada combinación
+  Prestador + Convenio + Prestación + Ámbito conserva su propio valor sin
+  colapsar a uno solo.
+- **Para que valga distinto por ámbito en serio:** el export de **valores** debe
+  incluir la columna **`Tipo Clase CM`** (igual que el consumo). Es lo único que
+  falta del lado de los datos; el motor ya está preparado.
+
+### 10.2 Los módulos de internación no vienen en la base
+Los **módulos día** de internación (por **Sala**: `UTI`, `UTI c/ARM`, `Clínica`,
+`Pediatría`, `Cuidados Intermedios`, etc.) **no suelen venir en el tarifario
+normal**. En la simulación del Hospital Italiano vienen en una **hoja aparte
+(`Int`)**, con un **formato distinto** al del tarifario ambulatorio:
+
+- Es **formato ancho**: una columna de valor **por mes de vigencia**
+  (`Septiembre 2025`, `Octubre 2025`, …`Mayo 2026`) en vez del `Mes Vigencia`
+  largo del tarifario normal.
+- La clave es la **Sala Internación** (con su `idPrestacion` puesto en **0** en
+  la hoja `Simulación`), no un código de prestación del nomenclador.
+- Suele haber **dos líneas por sala** (estándar y "Black"/habitación individual)
+  con valores propios.
+
+**Requisito de datos (para una próxima fase):** para que internación entre a la
+simulación automáticamente hay que **ingerir la hoja `Int`** como una fuente de
+tarifas adicional, normalizándola al contrato (derretir los meses-columna a
+`Mes Vigencia` + `Valor Convenido a HOY`, y mapear `Sala Internación` →
+`Prestacion Desc`/`Prestacion ID`). Mientras tanto, el simulador trabaja sobre
+las prestaciones que sí están en el tarifario; los módulos día quedan fuera
+(equivale a tratarlos como "No pauta" si no hay tarifa).
+
+### 10.3 Los aumentos (pauta) salen del INDEC
+La **pauta** de aumento se baja del **INDEC** (IPC). En la simulación real, el
+**"Valor propuesto"** se calcula como `Valor actual × (1 + pauta)` (verificado:
+p. ej. consulta `18.626,16 × 1,021 = 19.017,31`), mientras que el **"Valor
+solicitado"** es el **monto $** que pide el prestador. La app ya trae la
+inflación del INDEC (`core/indec.py`, tab *Evolución* → "Contexto macro") para
+usarla como referencia de pauta.

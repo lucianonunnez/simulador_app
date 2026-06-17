@@ -11,6 +11,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from ui.formatters import format_currency_full
+
 
 _MESES_ORDEN = {
     "01": (1, "Enero"),   "02": (2, "Febrero"),  "03": (3, "Marzo"),
@@ -35,6 +37,135 @@ def _parse_meses(df_merged: pd.DataFrame) -> dict[str, str]:
             resultado[label] = (info[0], yyyy, val)
     resultado_ordenado = dict(sorted(resultado.items(), key=lambda x: (x[1][1], x[1][0])))
     return {k: v[2] for k, v in resultado_ordenado.items()}
+
+
+def _render_por_prestacion(df_scope: pd.DataFrame, config: dict) -> None:
+    """
+    Interfaz de aumento MIXTO por prestación.
+
+    Replica el proceso real de negociación: un prestador con N prestaciones puede
+    pedir un **%** en algunas, proponer un **monto $** en otras, y dejar el resto
+    en un aumento **plano** (definido por nosotros). La idea de la revisión:
+    "selecciono prestación A, le cargo % o $ propuesto, y veo cómo se modifica;
+    luego la B, y así".
+
+    Llena en `config`:
+      - flat_pct          → el plano base para el "resto" (no ajustadas).
+      - prestacion_pcts    → {pid: %}  para las ajustadas por porcentaje.
+      - prestacion_valores → {pid: $}  para las ajustadas por monto absoluto.
+    """
+    base = st.number_input(
+        "Aumento plano para el resto (%)",
+        min_value=-100.0, max_value=500.0, value=15.0, step=0.5,
+        key="sim_prest_base",
+        help="Lo reciben todas las prestaciones que NO ajustes individualmente abajo.",
+    )
+    config["flat_pct"] = base
+
+    # Catálogo de prestaciones del scope con su valor actual representativo.
+    prests_all = (
+        df_scope.groupby("Prestacion ID", dropna=True)
+        .agg(**{
+            "Prestacion Desc": ("Prestacion Desc", "first"),
+            "Valor actual": ("Valor Convenido a HOY", "mean"),
+        })
+        .reset_index()
+        .sort_values("Prestacion Desc")
+    )
+    prests_all = prests_all[prests_all["Prestacion ID"].notna()]
+    prests_all["label"] = (
+        prests_all["Prestacion ID"].astype("Int64").astype(str)
+        + " — " + prests_all["Prestacion Desc"].astype(str)
+    )
+    valor_por_pid = dict(zip(prests_all["Prestacion ID"].astype("Int64"),
+                            prests_all["Valor actual"]))
+
+    seleccionadas = st.multiselect(
+        "Prestaciones a ajustar individualmente",
+        options=prests_all["label"].tolist(),
+        default=[],
+        placeholder="Escribí para buscar y seleccionar prestaciones...",
+        key="sim_prest_multi",
+        help="Cada prestación elegida puede recibir un % o un monto $ propio. "
+             "Las no elegidas usan el plano base de arriba.",
+    )
+
+    st.caption(
+        f"Las prestaciones **no seleccionadas** usan el plano base de **{base:.1f}%**. "
+        "Para cada seleccionada: elegí **Tipo** (% o $) y cargá el **Valor**."
+    )
+
+    if not seleccionadas:
+        return
+
+    # Tabla editable: una fila por prestación seleccionada. Tipo (% o $) + Valor.
+    filas = []
+    for label in seleccionadas:
+        try:
+            pid = int(label.split(" — ")[0])
+        except (ValueError, IndexError):
+            continue
+        desc = label.split(" — ", 1)[1] if " — " in label else label
+        filas.append({
+            "Prestación": desc,
+            "Valor actual": float(valor_por_pid.get(pid, 0.0) or 0.0),
+            "Tipo": "%",
+            "Valor": round(base, 2),
+            "_pid": pid,
+        })
+    if not filas:
+        return
+
+    editor_df = pd.DataFrame(filas)
+    edited = st.data_editor(
+        editor_df.drop(columns=["_pid"]),
+        key="sim_prest_editor",
+        hide_index=True,
+        use_container_width=True,
+        num_rows="fixed",
+        column_config={
+            "Prestación": st.column_config.TextColumn("Prestación", disabled=True),
+            "Valor actual": st.column_config.NumberColumn(
+                "Valor actual", disabled=True, format="$ %.2f",
+            ),
+            "Tipo": st.column_config.SelectboxColumn(
+                "Tipo", options=["%", "$"], required=True,
+                help="% = aumento porcentual sobre el valor actual · "
+                     "$ = monto propuesto (valor ofrecido absoluto)",
+            ),
+            "Valor": st.column_config.NumberColumn(
+                "Valor", help="El % de aumento o el monto $ propuesto, según el Tipo.",
+            ),
+        },
+    )
+
+    # Volcar lo editado a config y armar la vista previa de "cómo queda".
+    preview = []
+    for fila, (_, row) in zip(filas, edited.iterrows()):
+        pid = fila["_pid"]
+        actual = fila["Valor actual"]
+        tipo = row["Tipo"]
+        valor = row["Valor"]
+        if valor is None or pd.isna(valor):
+            continue
+        if tipo == "$":
+            ofrecido = float(valor)
+            config["prestacion_valores"][pid] = ofrecido
+        else:  # "%"
+            ofrecido = actual * (1 + float(valor) / 100)
+            config["prestacion_pcts"][pid] = float(valor)
+        var = (ofrecido / actual - 1) * 100 if actual else 0.0
+        preview.append({
+            "Prestación": fila["Prestación"],
+            "Valor actual": format_currency_full(actual),
+            "Tipo": tipo,
+            "Valor ofrecido": format_currency_full(ofrecido),
+            "Variación": f"{var:+.2f}%",
+        })
+
+    if preview:
+        st.caption("Así queda cada prestación ajustada:")
+        st.dataframe(pd.DataFrame(preview), use_container_width=True, hide_index=True)
 
 
 def render_simulator_controls(
@@ -105,6 +236,7 @@ def render_simulator_controls(
     config["pauta_pct"]          = None
     config["nomenclador_pcts"]   = {}
     config["prestacion_pcts"]    = {}
+    config["prestacion_valores"] = {}
     config["excluidas"]          = []
 
     # ── Expander: Definir Aumentos ──
@@ -172,69 +304,7 @@ def render_simulator_controls(
 
         # -------------------------------------------------------- POR PRESTACIÓN
         elif config["mode"] == "por_prestacion":
-            # Aumento base
-            base = st.number_input(
-                "Aumento Base (%)", min_value=-100.0, max_value=500.0,
-                value=15.0, step=0.5, key="sim_prest_base",
-            )
-
-            # Selectbox de prestaciones (con búsqueda integrada)
-            prests_all = (
-                df_scope[["Prestacion ID", "Prestacion Desc"]]
-                .drop_duplicates()
-                .sort_values("Prestacion Desc")
-            )
-            prests_all["label"] = (
-                prests_all["Prestacion ID"].astype(str) + " — " + prests_all["Prestacion Desc"]
-            )
-
-            seleccionadas = st.multiselect(
-                "Prestaciones a ajustar",
-                options=prests_all["label"].tolist(),
-                default=[],
-                placeholder="Escribí para buscar o seleccioná prestaciones...",
-                key="sim_prest_multi",
-                help="Solo las prestaciones seleccionadas aquí recibirán un % diferente al base",
-            )
-
-            st.caption(
-                f"Las prestaciones **no seleccionadas** usarán el aumento base de {base:.1f}%. "
-                "Seleccioná solo las que querés ajustar individualmente."
-            )
-
-            # Primero aplicar base a todas
-            for _, row in prests_all.iterrows():
-                pid = int(row["Prestacion ID"]) if pd.notna(row["Prestacion ID"]) else None
-                if pid is not None:
-                    config["prestacion_pcts"][pid] = base
-
-            # Luego override para las seleccionadas
-            if seleccionadas:
-                st.markdown("---")
-                st.caption("Ajustá el % para cada prestación seleccionada:")
-                cols = st.columns(3)
-                for idx, label in enumerate(seleccionadas):
-                    pid_str = label.split(" — ")[0]
-                    desc    = label.split(" — ", 1)[1] if " — " in label else label
-                    try:
-                        pid = int(pid_str)
-                    except ValueError:
-                        continue
-                    with cols[idx % 3]:
-                        # Nombre visible encima del input
-                        st.markdown(
-                            f"<div style='font-size:12px; color:#212529; font-weight:500; "
-                            f"margin-bottom:2px; line-height:1.3;'>{desc[:35]}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        pct = st.number_input(
-                            label=desc,
-                            min_value=-100.0, max_value=500.0,
-                            value=base, step=0.5,
-                            key=f"prest_{pid}",
-                            label_visibility="collapsed",
-                        )
-                        config["prestacion_pcts"][pid] = pct
+            _render_por_prestacion(df_scope, config)
 
     # ── Expander: Exclusiones (No pauta) ──
     with st.expander("Exclusiones — No pauta", expanded=False):

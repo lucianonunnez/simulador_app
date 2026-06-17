@@ -92,6 +92,77 @@ def test_apply_simulation_aumento_plano():
     assert out.loc[0, "% Aumento"] == pytest.approx(10.0)
 
 
+def test_apply_simulation_por_prestacion_mixto_pct_monto_y_plano():
+    """Aumento mixto por prestación: una pide %, otra un monto $, y el resto
+    queda en el plano base. Es el caso real (un prestador con varias
+    prestaciones: % en algunas, $ en otras, plano en el resto)."""
+    df = pd.DataFrame({
+        "Prestador ID": [1, 1, 1],
+        "Convenio ID": [1, 1, 1],
+        "Prestacion ID": [10, 20, 30],
+        "Nomenclador": ["A", "A", "A"],
+        "Cantidad CM": [1, 1, 1],
+        "Valor Convenido a HOY": [100.0, 200.0, 300.0],
+    })
+    out = apply_simulation(
+        df, months=1, mode="por_prestacion", flat_pct=10.0,
+        prestacion_pcts={20: 50.0},        # % sobre el valor actual
+        prestacion_valores={30: 600.0},    # monto $ absoluto propuesto
+    ).set_index("Prestacion ID")
+    assert out.loc[10, "Valor Ofrecido"] == pytest.approx(110.0)   # plano base 10%
+    assert out.loc[20, "Valor Ofrecido"] == pytest.approx(300.0)   # +50%
+    assert out.loc[30, "Valor Ofrecido"] == pytest.approx(600.0)   # monto $ fijo
+    assert out.loc[30, "% Aumento"] == pytest.approx(100.0)        # 600/300 - 1
+
+
+def test_apply_simulation_monto_pisa_al_pct_en_misma_prestacion():
+    """Si una prestación tiene cargado % Y monto $, el monto $ manda."""
+    df = pd.DataFrame({
+        "Prestador ID": [1], "Convenio ID": [1], "Prestacion ID": [10],
+        "Nomenclador": ["A"], "Cantidad CM": [1], "Valor Convenido a HOY": [100.0],
+    })
+    out = apply_simulation(
+        df, months=1, mode="por_prestacion", flat_pct=0.0,
+        prestacion_pcts={10: 50.0}, prestacion_valores={10: 130.0},
+    )
+    assert out.loc[0, "Valor Ofrecido"] == pytest.approx(130.0)
+
+
+def test_merge_separa_valor_por_ambito_internacion_vs_ambulatorio():
+    """Una misma prestación con distinto valor en Internación vs Ambulatorio:
+    si AMBOS lados traen 'Tipo Clase CM', el merge conserva los dos valores."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1, 1], "Convenio ID": [1, 1], "Prestacion ID": [100, 100],
+        "Tipo Clase CM": ["Ambulatorio", "Internación"], "Cantidad CM": [2, 3],
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1, 1], "Convenio ID": [1, 1], "Prestacion ID": [100, 100],
+        "Tipo Clase CM": ["Ambulatorio", "Internación"],
+        "Valor Convenido a HOY": [50.0, 80.0],
+    })
+    merged = merge_datasets(consumo, valores).set_index("Tipo Clase CM")
+    assert len(merged) == 2
+    assert merged.loc["Ambulatorio", "Valor Convenido a HOY"] == 50.0
+    assert merged.loc["Internación", "Valor Convenido a HOY"] == 80.0
+
+
+def test_merge_sin_ambito_en_valores_es_retrocompatible():
+    """Si el tarifario NO trae 'Tipo Clase CM' (caso actual), el ámbito se
+    ignora en el merge: una sola tarifa cubre las dos filas de consumo, sin
+    fan-out ni error de validación m:1."""
+    consumo = pd.DataFrame({
+        "Prestador ID": [1, 1], "Convenio ID": [1, 1], "Prestacion ID": [100, 100],
+        "Tipo Clase CM": ["Ambulatorio", "Internación"], "Cantidad CM": [2, 3],
+    })
+    valores = pd.DataFrame({
+        "Prestador ID": [1], "Convenio ID": [1], "Prestacion ID": [100],
+        "Valor Convenido a HOY": [50.0],
+    })
+    merged = merge_datasets(consumo, valores)
+    assert len(merged) == 2
+    assert (merged["Valor Convenido a HOY"] == 50.0).all()
+
+
 # ----------------------------------------------------------------------------
 # core.anomaly
 # ----------------------------------------------------------------------------
