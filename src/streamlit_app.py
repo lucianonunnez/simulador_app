@@ -108,33 +108,13 @@ with st.sidebar:
 def _render_inicio() -> None:
     from core.data_loader import resumen_base
 
-    # ── Hero compacto con marca ──
-    st.markdown(f"""
-    <div style="padding: 4px 0 0 0;">
-        <div style="font-size:13px; font-weight:700; color:#E4002B;
-                    letter-spacing:1.5px; text-transform:uppercase;">
-            Swiss Medical
-        </div>
-        <div style="font-size:28px; font-weight:700; color:#212529;
-                    line-height:1.2; margin-top:2px;">
-            Simulador de Costo Médico
-        </div>
-        <div style="font-size:14px; color:#5A5A5A; margin-top:6px;">
-            Hola, {_nombre}. Elegí un módulo para empezar.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div style='margin-bottom:32px'></div>", unsafe_allow_html=True)
+    st.title("Simulador de Costo Médico")
+    st.caption(
+        f"Bienvenido, **{_nombre}** — elegí un módulo abajo o desde el menú izquierdo."
+    )
+    st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
 
     # ── Estado de los datos ──
-    st.markdown("""
-    <div style="font-size:11px; font-weight:700; color:#5A5A5A;
-                letter-spacing:1px; text-transform:uppercase; margin-bottom:8px;">
-        Estado de los datos
-    </div>
-    """, unsafe_allow_html=True)
-
     resumen = resumen_base()
     if resumen:
         c1, c2, c3, c4 = st.columns(4)
@@ -149,58 +129,47 @@ def _render_inicio() -> None:
             "ingerir lo que dejes en `data/raw/` con un click."
         )
 
-    st.markdown("<div style='margin-bottom:32px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom:24px'></div>", unsafe_allow_html=True)
 
     # ── Cards de módulos (accionables) ──
-    st.markdown("""
-    <div style="font-size:11px; font-weight:700; color:#5A5A5A;
-                letter-spacing:1px; text-transform:uppercase; margin-bottom:8px;">
-        Módulos
-    </div>
-    """, unsafe_allow_html=True)
-
     card_style = """
         background: #FFFFFF;
         border: 1px solid #E9ECEF;
+        border-top: 3px solid #E4002B;
         border-radius: 12px;
-        padding: 20px 20px 14px 20px;
+        padding: 24px 22px 16px 22px;
         box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-        min-height: 132px;
-    """
-    badge_style = """
-        display:inline-flex; align-items:center; justify-content:center;
-        width:32px; height:32px; border-radius:50%;
-        background:#FFF0F3; color:#E4002B;
-        font-size:15px; font-weight:700;
-        margin-bottom:12px;
+        min-height: 130px;
     """
     cards = [
-        ("1", "Módulo 1 — Simulador", "Simulador",
-         "Cuánto impacta un aumento de tarifas, antes de negociarlo."),
-        ("2", "Módulo 2 — Desvíos", "Desvíos",
-         "Detectá costos fuera de lo esperado por prestador o prestación."),
-        ("3", "Módulo 3 — Predicción ML", "Predicción",
-         "Proyectá el costo de los próximos meses con modelos de ML."),
+        ("Módulo 1 — Simulador",
+         "Proyección de impacto financiero por cambios de tarifas: escenarios "
+         "Solicitado vs Propuesto, Extrapauta y exclusiones No pauta."),
+        ("Módulo 2 — Desvíos",
+         "Detección de anomalías en costos por prestador, prestación o grupo, "
+         "con análisis temporal y estructural."),
+        ("Módulo 3 — Predicción ML",
+         "Pronóstico con LightGBM y red neuronal. Comparativa de modelos con "
+         "métricas de performance."),
     ]
 
     cols = st.columns(3)
-    for col, (num, destino, nombre_corto, valor) in zip(cols, cards):
+    for col, (titulo, desc) in zip(cols, cards):
         with col:
             st.markdown(f"""
             <div style="{card_style}">
-                <div style="{badge_style}">{num}</div>
-                <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:6px;">
-                    {nombre_corto}
+                <div style="font-size:16px; font-weight:700; color:#212529; margin-bottom:8px;">
+                    {titulo}
                 </div>
                 <div style="font-size:13px; color:#5A5A5A; line-height:1.5;">
-                    {valor}
+                    {desc}
                 </div>
             </div>
             """, unsafe_allow_html=True)
             if st.button(
-                "Abrir módulo →", key=f"abrir_{destino}", use_container_width=True
+                "Abrir →", key=f"abrir_{titulo}", use_container_width=True
             ):
-                st.session_state["_nav_destino"] = destino
+                st.session_state["_nav_destino"] = titulo
                 st.rerun()
 
 
