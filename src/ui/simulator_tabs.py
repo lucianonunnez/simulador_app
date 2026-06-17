@@ -79,6 +79,56 @@ def render_tabs(
 # ----------------------------------------------------------------------------
 # TAB 0: EVOLUCIÓN TEMPORAL
 # ----------------------------------------------------------------------------
+def _tabla_historico_pauta(df_time: pd.DataFrame, tick_texts: list[str]) -> None:
+    """
+    Tabla horizontal (meses en columnas) con dos filas:
+      1) % de inflación del INDEC (la "pauta" publicada) — se precarga desde la
+         API del INDEC en los meses donde hay dato publicado.
+      2) % de aumento otorgado en cada mes — histórico que todavía NO tenemos
+         como dato; queda el lugar RESERVADO (—) para cargarlo más adelante.
+
+    Es el "histórico de pauta": permite contrastar lo que dio el INDEC contra
+    lo que efectivamente se otorgó, mes a mes.
+    """
+    meses_periodo = df_time["Mes"].astype(str).tolist()   # 'MM-YYYY'
+
+    # Inflación INDEC por mes (donde haya dato publicado).
+    infl_map: dict[str, float] = {}
+    try:
+        infl = fetch_inflation(months=24)
+        if not infl.empty:
+            tmp = infl.copy()
+            tmp["k"] = tmp["Mes"].dt.strftime("%m-%Y")
+            infl_map = dict(zip(tmp["k"], tmp["Inflacion"]))
+    except Exception:
+        logger.exception("No se pudo obtener inflación INDEC para la tabla histórica")
+
+    fila_indec = [
+        f"{infl_map[m]:.1f}%" if m in infl_map else "—" for m in meses_periodo
+    ]
+    fila_aumento = ["—"] * len(meses_periodo)   # reservado: aún sin histórico
+
+    tabla = pd.DataFrame(
+        [fila_indec, fila_aumento],
+        index=["Inflación INDEC (%)", "Aumento otorgado (%)"],
+        columns=tick_texts,
+    )
+    st.markdown("""
+    <div style="background:#FFF0F3; border-left:3px solid #E4002B;
+                padding:8px 14px; border-radius:6px; margin:4px 0 6px 0;
+                font-weight:600; color:#212529; font-size:13px;">
+        Histórico de pauta — Inflación INDEC vs. aumento otorgado
+    </div>
+    """, unsafe_allow_html=True)
+    st.dataframe(tabla, use_container_width=True)
+    st.caption(
+        "Pauta del INDEC (IPC mensual) precargada donde hay dato publicado. "
+        "La fila **Aumento otorgado** queda reservada: se completará cuando "
+        "tengamos el histórico de lo otorgado mes a mes."
+    )
+    st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+
 def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
     st.subheader("Evolución Temporal del Consumo")
 
@@ -94,6 +144,9 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
 
     tick_vals  = df_time["mes_dt"].tolist()
     tick_texts = [_mes_label(d) for d in tick_vals]
+
+    # Tabla histórica de pauta (inflación INDEC vs aumento otorgado) por mes.
+    _tabla_historico_pauta(df_time, tick_texts)
 
     def _line_fig(col_name: str, title: str, fmt) -> tuple[go.Figure, str | None]:
         """Gráfico de línea + insight: anillo sutil sobre el pico y una línea
@@ -217,10 +270,39 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
 # ----------------------------------------------------------------------------
 # TAB 1: POR NOMENCLADOR
 # ----------------------------------------------------------------------------
+# Definiciones de Ideal vs Simulado (se reutilizan en hovers y en la ayuda).
+_HOVER_IDEAL = (
+    "<b>%{x}</b><br>Consumo <b>Ideal</b>: %{y:$,.0f}<br>"
+    "<i>Cantidad CM × Valor actual (vigente)</i><extra></extra>"
+)
+_HOVER_SIM = (
+    "<b>%{x}</b><br>Consumo <b>Simulado</b>: %{y:$,.0f}<br>"
+    "<i>Cantidad CM × Valor ofrecido (con el aumento)</i><extra></extra>"
+)
+
+
+def _ayuda_ideal_vs_simulado() -> None:
+    """Explica qué es cada serie y de dónde sale (la leyenda de Plotly no admite
+    tooltips, así que la referencia 'de dónde salió' va en este bloque)."""
+    with st.expander("ℹ️ ¿Qué son «Ideal» y «Simulado»? (de dónde sale cada uno)"):
+        st.markdown(
+            "- **Consumo Ideal** — el consumo valorizado al **valor actual** "
+            "(el vigente hoy, sin aumento).\n"
+            "  Sale de: **Cantidad CM × Valor Convenido a HOY**.\n"
+            "- **Consumo Simulado** — el mismo consumo valorizado al **valor "
+            "ofrecido**, es decir tras aplicar el aumento que cargaste arriba.\n"
+            "  Sale de: **Cantidad CM × Valor Ofrecido** "
+            "(donde *Valor Ofrecido = Valor actual × (1 + aumento%)* o el monto $ "
+            "propuesto).\n\n"
+            "La **diferencia** entre ambos es el **impacto** del aumento."
+        )
+
+
 def _tab_nomenclador(df: pd.DataFrame) -> None:
     st.subheader("Análisis por Nomenclador")
 
     grouping = st.radio("Agrupar por", ["Nomenclador", "Tipo Clase CM"], horizontal=True)
+    _ayuda_ideal_vs_simulado()
     df_agg = aggregate_top_n(df, grouping, ["Consumo Ideal", "Consumo Simulado"], top_n=25)
 
     c1, c2 = st.columns(2)
@@ -228,9 +310,11 @@ def _tab_nomenclador(df: pd.DataFrame) -> None:
     with c1:
         fig = go.Figure()
         fig.add_trace(go.Bar(x=df_agg[grouping], y=df_agg["Consumo Ideal"],
-                             name="Ideal", marker_color=COLOR_ROJO))
+                             name="Ideal", marker_color=COLOR_ROJO,
+                             hovertemplate=_HOVER_IDEAL))
         fig.add_trace(go.Bar(x=df_agg[grouping], y=df_agg["Consumo Simulado"],
-                             name="Simulado", marker_color=COLOR_GRIS))
+                             name="Simulado", marker_color=COLOR_GRIS,
+                             hovertemplate=_HOVER_SIM))
         layout = _layout_base(title=f"Consumo por {grouping}")
         layout["xaxis"]["title"] = dict(text=grouping)
         layout["yaxis"]["title"] = dict(text="Consumo ($)")
@@ -328,6 +412,25 @@ def _tab_top_prestaciones(df: pd.DataFrame) -> None:
 # ----------------------------------------------------------------------------
 # TAB 3: POR MEGACUENTA
 # ----------------------------------------------------------------------------
+def _detalle_otros(df: pd.DataFrame, group_col: str, value_col: str, top_n: int = 25) -> str:
+    """Texto con las categorías que aggregate_top_n agrupó bajo 'Otros'.
+
+    Se usa para el hover del gráfico circular: parado sobre 'Otros' aparece
+    qué representa (cuántas categorías agrupa y cuáles), en vez de un opaco
+    'Otros'."""
+    full = (
+        df.groupby(group_col, dropna=False)[value_col]
+        .sum().sort_values(ascending=False)
+    )
+    if len(full) <= top_n:
+        return ""
+    tail = full.iloc[top_n:]
+    nombres = [str(n) for n in tail.index]
+    muestra = ", ".join(nombres[:10])
+    extra = f" y {len(nombres) - 10} más" if len(nombres) > 10 else ""
+    return f"Agrupa {len(nombres)} categorías: {muestra}{extra}"
+
+
 def _tab_megacuenta(df: pd.DataFrame) -> None:
     st.subheader("Análisis por Megacuenta")
 
@@ -372,13 +475,22 @@ def _tab_megacuenta(df: pd.DataFrame) -> None:
             title="Composición Megacuenta", hole=0.35,
         )
         total_mega = df_mega["Consumo Ideal"].sum()
+        # Hover de 'Otros': qué megacuentas agrupa (se calcula sobre el df full,
+        # antes del top-N). El resto de las porciones no llevan detalle.
+        detalle_otros = _detalle_otros(df, "Megacuenta", "Consumo Ideal", top_n=25)
+        customdata = [
+            [f"<br>{detalle_otros}" if str(m) == "Otros" and detalle_otros else ""]
+            for m in df_mega["Megacuenta"]
+        ]
         fig.update_traces(
             text=[f"{v/total_mega*100:.1f}%" if total_mega > 0 and v/total_mega >= 0.05 else ""
                   for v in df_mega["Consumo Ideal"]],
             textinfo="text",
             textposition="inside",
             insidetextorientation="radial",
-            hovertemplate="<b>%{label}</b><br>%{value:$,.0f}<br>%{percent}<extra></extra>",
+            customdata=customdata,
+            hovertemplate="<b>%{label}</b><br>%{value:$,.0f} · %{percent}"
+                          "%{customdata[0]}<extra></extra>",
         )
         fig.update_layout(
             title=dict(text="Composición Megacuenta",
@@ -459,24 +571,31 @@ def _tab_comparativa(df_merged: pd.DataFrame, prestador_id: int | None) -> None:
         return
 
     # ── Selección de prestadores a comparar ──
-    # Por defecto se comparan TODOS los que ofrecen esta prestación; el usuario
-    # puede acotar a un subconjunto (p. ej. comparar solo contra prestadores de
-    # la misma coordinación / similares).
+    # Dos modos: ver TODOS los prestadores cargados que ofrecen esta prestación,
+    # o elegir SOLO algunos de ellos (p. ej. comparar contra prestadores de la
+    # misma coordinación / similares).
     prest_disp = sorted(df_comp["Prestador Desc"].dropna().unique().astype(str).tolist())
-    prest_sel = st.multiselect(
-        "Prestadores a comparar",
-        options=prest_disp,
-        default=prest_disp,
-        key="comp_prestadores",
-        placeholder="Seleccioná los prestadores a comparar...",
-        help="Por defecto se comparan todos los que ofrecen esta prestación. "
-             "Acotá la lista para comparar solo contra prestadores similares.",
+    modo_comp = st.radio(
+        "¿Qué prestadores comparar?",
+        ["Todos los cargados", "Seleccionar algunos"],
+        horizontal=True,
+        key="comp_modo",
+        help=f"Esta prestación la ofrecen {len(prest_disp)} prestador(es) "
+             "de los cargados.",
     )
-    if prest_sel:
+    if modo_comp == "Seleccionar algunos":
+        prest_sel = st.multiselect(
+            "Prestadores a comparar",
+            options=prest_disp,
+            default=prest_disp[:min(5, len(prest_disp))],
+            key="comp_prestadores",
+            placeholder="Seleccioná los prestadores a comparar...",
+            help="Elegí los prestadores contra los que querés comparar.",
+        )
+        if not prest_sel:
+            st.info("Seleccioná al menos un prestador para comparar.")
+            return
         df_comp = df_comp[df_comp["Prestador Desc"].astype(str).isin(prest_sel)]
-    if len(df_comp) == 0:
-        st.info("Seleccioná al menos un prestador para comparar.")
-        return
 
     df_group = df_comp.groupby("Prestador Desc").agg({
         "Valor Convenido a HOY": "mean",
