@@ -25,10 +25,17 @@ pdf.add_font("mono", "", MONO)
 W = pdf.w - pdf.l_margin - pdf.r_margin
 
 
+def _cell(txt, h):
+    """multi_cell que SIEMPRE arranca en el margen izq. y baja a la linea
+    siguiente (evita el desborde a la derecha por defecto de fpdf2)."""
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(W, h, txt, new_x="LMARGIN", new_y="NEXT")
+
+
 def h1(txt):
     pdf.set_font("serif", "B", 17)
     pdf.set_text_color(*BLACK)
-    pdf.multi_cell(W, 8, txt)
+    _cell(txt, 8)
     pdf.ln(1)
 
 
@@ -36,7 +43,7 @@ def h2(txt):
     pdf.ln(2)
     pdf.set_font("serif", "B", 12.5)
     pdf.set_text_color(*BLACK)
-    pdf.multi_cell(W, 6.2, txt)
+    _cell(txt, 6.2)
     y = pdf.get_y() + 0.5
     pdf.set_draw_color(*RULE)
     pdf.set_line_width(0.2)
@@ -47,13 +54,13 @@ def h2(txt):
 def body(txt):
     pdf.set_font("serif", "", 11)
     pdf.set_text_color(*BLACK)
-    pdf.multi_cell(W, 5.4, txt)
+    _cell(txt, 5.4)
 
 
 def small(txt):
     pdf.set_font("serif", "I", 9.5)
     pdf.set_text_color(*GRAY)
-    pdf.multi_cell(W, 4.6, txt)
+    _cell(txt, 4.6)
     pdf.set_text_color(*BLACK)
 
 
@@ -82,8 +89,8 @@ def formula(txt):
 h1("Modulo 1 - Simulador de Aumentos")
 pdf.set_font("serif", "I", 11)
 pdf.set_text_color(*GRAY)
-pdf.multi_cell(W, 5.2, "Como se calcula cada metrica que se muestra en pantalla. "
-                      "Todas las formulas son las que usa la aplicacion internamente.")
+_cell("Como se calcula cada metrica que se muestra en pantalla. "
+      "Todas las formulas son las que usa la aplicacion internamente.", 5.2)
 pdf.set_text_color(*BLACK)
 pdf.ln(2)
 
