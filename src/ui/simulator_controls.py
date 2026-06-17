@@ -203,14 +203,17 @@ def render_simulator_controls(
 
     with col_modo:
         mode_label = st.radio(
-            "Tipo de Aumento",
-            ["Plano", "Por Nomenclador", "Por Prestación"],
+            "Tipo de aumento",
+            ["Igual para todo", "Por grupo de prácticas", "Detallado por prestación (% o $)"],
             horizontal=True, key="sim_mode",
         )
 
     config["prestador_id"] = None if selected == "TODOS" else int(selected.split(" - ")[0])
-    config["mode"] = {"Plano": "plano", "Por Nomenclador": "por_nomenclador",
-                      "Por Prestación": "por_prestacion"}[mode_label]
+    config["mode"] = {
+        "Igual para todo": "plano",
+        "Por grupo de prácticas": "por_nomenclador",
+        "Detallado por prestación (% o $)": "por_prestacion",
+    }[mode_label]
 
     # ── Fila 2: Meses ──
     meses_dict = _parse_meses(df_merged)
