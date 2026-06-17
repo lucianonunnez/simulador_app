@@ -331,23 +331,52 @@ def _render_ingesta_pendiente() -> None:
 
 
 # ============================================================================
-# FALLBACK: UPLOAD MANUAL
+# UPLOAD MANUAL + FUENTE DE DATOS
 # ============================================================================
-def _load_from_upload(
-    uploaded_file, expected_cols: set, numeric_cols: set, label: str
-) -> Optional[pd.DataFrame]:
-    """Carga un archivo subido manualmente desde la UI (fallback)."""
+# Etiquetas del selector de fuente (también las lee module1 para decidir si
+# evitar el push-down y armar el selector desde los datos cargados).
+SRC_BASE = "Base (datos cargados)"
+SRC_SUBIDOS = "Solo archivos subidos"
+SRC_COMBINAR = "Combinar base + subidos"
+
+
+def source_uses_uploads() -> bool:
+    """True si la fuente elegida usa archivos subidos (solo o combinados).
+
+    module1 la consulta ANTES de cargar: cuando hay subidos no conviene el
+    push-down por prestador (se necesita el universo completo) y el selector
+    de prestadores debe salir de los datos, no del catálogo de la base.
+    """
+    return st.session_state.get("data_source_radio") in (SRC_SUBIDOS, SRC_COMBINAR)
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _parse_upload(content: bytes, expected: tuple, numeric: tuple) -> pd.DataFrame:
+    """Parsea + limpia un archivo subido (cacheado por contenido).
+
+    Cacheado por los bytes del archivo: sin esto se re-parsearía el Excel en
+    CADA rerun (caro con archivos grandes). clean_dataset deja el archivo con
+    el mismo esquema que la base (numéricas coaccionadas, mes 'MM-YYYY', IDs
+    Int64), así combinar base + subido es consistente.
+    """
+    df = load_excel_smart(content, set(expected))
+    return clean_dataset(df, set(numeric))
+
+
+def _leer_subido(uploaded_file, expected_cols: set, numeric_cols: set, label: str):
+    """Lee un archivo del uploader (o None) y reporta estado en el sidebar."""
     if uploaded_file is None:
         return None
     try:
-        with st.spinner(f"Leyendo {label}..."):
-            content = uploaded_file.read()
-            df = load_excel_smart(content, expected_cols)
+        df = _parse_upload(
+            uploaded_file.getvalue(),
+            tuple(sorted(expected_cols)),
+            tuple(sorted(numeric_cols)),
+        )
         miss = missing_columns(df, expected_cols)
         if miss:
-            st.warning(f"{label}: faltan columnas {sorted(miss)}")
-        df = clean_dataset(df, numeric_cols)
-        st.success(f"{label} cargado: {len(df):,} filas")
+            st.warning(f"{label} (subido): faltan columnas {sorted(miss)}")
+        st.success(f"{label} subido: {len(df):,} filas")
         return df
     except Exception:
         logger.exception("Error leyendo el archivo subido de %s", label)
@@ -358,6 +387,21 @@ def _load_from_upload(
         return None
 
 
+def _concat_datasets(
+    base: Optional[pd.DataFrame], extra: Optional[pd.DataFrame]
+) -> Optional[pd.DataFrame]:
+    """Une base + subido para el modo 'combinar' (unión de columnas, sin dupes)."""
+    if base is None:
+        return extra
+    if extra is None:
+        return base
+    cols = list(dict.fromkeys([*base.columns, *extra.columns]))
+    out = pd.concat(
+        [base.reindex(columns=cols), extra.reindex(columns=cols)], ignore_index=True
+    )
+    return out.drop_duplicates().reset_index(drop=True)
+
+
 # ============================================================================
 # API PÚBLICA
 # ============================================================================
@@ -366,33 +410,34 @@ def load_consumo_and_valores(
     meses: Optional[Iterable] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
-    Carga consumo y valores desde DuckDB (con filtros opcionales).
+    Carga consumo y valores según la FUENTE elegida en el sidebar.
+
+    Fuentes (selector "Carga de datos" → "Fuente de datos"):
+      - Base: lo ingerido en DuckDB (con push-down opcional por prestador/mes).
+      - Solo archivos subidos: simula con lo que el usuario sube en el momento.
+      - Combinar base + subidos: une ambos (la base completa + los subidos).
 
     Args:
-        prestador_ids: si se pasa, filtra por esos "Prestador ID" (más liviano).
-        meses: si se pasa, filtra por esos meses ("Mes" / "Mes Vigencia").
+        prestador_ids: filtra por esos "Prestador ID" (push-down, solo aplica a
+            la fuente Base; con subidos/combinar se trae el universo completo).
+        meses: filtra por esos meses (idem, solo fuente Base).
 
     Returns:
         (df_consumo, df_valores). Cada uno puede ser None si no se cargó.
-
-    Nota: sin argumentos trae las tablas completas (comportamiento histórico,
-    apto para volúmenes de demo). Para datasets grandes conviene pasar
-    prestador_ids/meses y dejar que DuckDB filtre en disco.
     """
     pid = _as_tuple(prestador_ids)
     mes = _as_tuple(meses)
     estado = _db_fingerprint()
 
-    df_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes, estado)
-    df_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes, estado)
+    base_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes, estado)
+    base_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes, estado)
+    base_ok = base_consumo is not None and base_valores is not None
 
-    need_fallback = df_consumo is None or df_valores is None
-
-    with st.sidebar.expander("Carga de datos", expanded=need_fallback):
-        if df_consumo is not None:
-            st.success(f"Consumo: {len(df_consumo):,} filas")
-        if df_valores is not None:
-            st.success(f"Valores: {len(df_valores):,} filas")
+    with st.sidebar.expander("Carga de datos", expanded=not base_ok):
+        if base_consumo is not None:
+            st.success(f"Base · Consumo: {len(base_consumo):,} filas")
+        if base_valores is not None:
+            st.success(f"Base · Valores: {len(base_valores):,} filas")
 
         if st.button(
             "Recargar datos",
@@ -406,40 +451,64 @@ def load_consumo_and_valores(
 
         _render_ingesta_pendiente()
 
-        # ---- Fallback: upload manual si falta algún dataset ----
-        if df_consumo is None:
-            st.divider()
-            st.caption(
-                "Consumo no está en la base. Subilo manualmente o corré "
-                "`python scripts/ingest.py`."
-            )
-            up_c = st.file_uploader(
-                "Subir Consumo (xlsx/csv)",
-                type=["xlsx", "csv"],
-                key="upload_consumo",
-                label_visibility="collapsed",
-            )
-            df_consumo = _load_from_upload(
-                up_c, EXPECTED_CONSUMO_COLS, CONSUMO_NUMERIC_COLS, "Consumo"
-            )
+        # ── Subir archivos (siempre disponible) ──
+        st.divider()
+        st.markdown("**Subir archivos** _(opcional)_")
+        st.caption(
+            "Subí Consumo y/o Valores para simular con datos propios "
+            "(p. ej. el export de un prestador puntual)."
+        )
+        up_c = st.file_uploader(
+            "Consumo (xlsx/csv)", type=["xlsx", "csv"], key="upload_consumo",
+        )
+        up_v = st.file_uploader(
+            "Valores (xlsx/csv)", type=["xlsx", "csv"], key="upload_valores",
+        )
+        sub_consumo = _leer_subido(up_c, EXPECTED_CONSUMO_COLS, CONSUMO_NUMERIC_COLS, "Consumo")
+        sub_valores = _leer_subido(up_v, EXPECTED_VALORES_COLS, VALORES_NUMERIC_COLS, "Valores")
+        hay_sub = sub_consumo is not None or sub_valores is not None
 
-        if df_valores is None:
-            st.divider()
-            st.caption(
-                "Valores no está en la base. Subilo manualmente o corré "
-                "`python scripts/ingest.py`."
+        # ── Fuente de datos ──
+        if hay_sub and base_ok:
+            fuente = st.radio(
+                "Fuente de datos",
+                [SRC_BASE, SRC_SUBIDOS, SRC_COMBINAR],
+                key="data_source_radio",
+                help="¿Simular con la base, solo con lo que subiste, o combinando ambos?",
             )
-            up_v = st.file_uploader(
-                "Subir Valores (xlsx/csv)",
-                type=["xlsx", "csv"],
-                key="upload_valores",
-                label_visibility="collapsed",
-            )
-            df_valores = _load_from_upload(
-                up_v, EXPECTED_VALORES_COLS, VALORES_NUMERIC_COLS, "Valores"
-            )
+        elif hay_sub:
+            fuente = SRC_SUBIDOS
+            st.info("No hay base cargada: se simulará con los archivos subidos.")
+        else:
+            fuente = SRC_BASE
+            # Sin archivos subidos, limpiar una selección de fuente vieja para
+            # que source_uses_uploads() no quede "pegada" en subidos/combinar
+            # (y module1 recupere el push-down por prestador).
+            st.session_state.pop("data_source_radio", None)
+            if not base_ok:
+                st.caption(
+                    "No hay datos en la base. Subí los archivos arriba o corré "
+                    "`python scripts/ingest.py`."
+                )
 
-    return df_consumo, df_valores
+    # ── Resolución de la fuente ──
+    if fuente == SRC_SUBIDOS:
+        # Si falta un lado, se completa con la base (si existe) para poder mergear.
+        c = sub_consumo if sub_consumo is not None else base_consumo
+        v = sub_valores if sub_valores is not None else base_valores
+        return c, v
+
+    if fuente == SRC_COMBINAR:
+        # Combinar necesita la base COMPLETA (sin el filtro de push-down por
+        # prestador): se re-consulta sin filtros si la carga vino filtrada.
+        full_c = base_consumo if pid is None else _query_table(
+            CONSUMO_TABLE, CONSUMO_MES_COL, None, None, estado)
+        full_v = base_valores if pid is None else _query_table(
+            VALORES_TABLE, VALORES_MES_COL, None, None, estado)
+        return _concat_datasets(full_c, sub_consumo), _concat_datasets(full_v, sub_valores)
+
+    # Fuente Base (comportamiento histórico, con push-down).
+    return base_consumo, base_valores
 
 
 # ============================================================================

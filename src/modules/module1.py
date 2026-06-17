@@ -13,6 +13,7 @@ from core.data_loader import (
     get_merged_dataset,
     get_prestadores_disponibles,
     load_consumo_and_valores,
+    source_uses_uploads,
 )
 from core.simulator import apply_simulation, impact_metrics
 from ui.formatters import format_currency, format_currency_full, format_int
@@ -166,17 +167,21 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
-    # Push-down a DuckDB: si ya hay un prestador elegido y la base está
-    # disponible, se carga SOLO ese prestador (filtro en SQL) en vez de traer
-    # las tablas completas a RAM y filtrar en pandas. El selector usa el
-    # catálogo liviano para poder cambiar de prestador igual.
-    catalogo = get_prestadores_disponibles()
-    pid_previo = _prestador_seleccionado() if catalogo else None
-
-    if pid_previo is not None:
-        df_consumo, df_valores = load_consumo_and_valores(prestador_ids=[pid_previo])
-    else:
+    # Cuando la fuente usa archivos subidos (solo o combinados) se trae el
+    # universo completo y el selector de prestadores se arma desde los datos
+    # (catalogo=None) — así aparecen también los prestadores subidos. Si la
+    # fuente es la base, se mantiene el push-down: se carga SOLO el prestador
+    # elegido (filtro en SQL) y el selector usa el catálogo liviano de DuckDB.
+    if source_uses_uploads():
+        catalogo = None
         df_consumo, df_valores = load_consumo_and_valores()
+    else:
+        catalogo = get_prestadores_disponibles()
+        pid_previo = _prestador_seleccionado() if catalogo else None
+        if pid_previo is not None:
+            df_consumo, df_valores = load_consumo_and_valores(prestador_ids=[pid_previo])
+        else:
+            df_consumo, df_valores = load_consumo_and_valores()
 
     if df_consumo is None or df_valores is None:
         cargando.empty()
