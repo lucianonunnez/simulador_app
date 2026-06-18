@@ -20,6 +20,7 @@ from core.anomaly import (
     detect_structural_anomalies,
     detect_temporal_anomalies,
 )
+from ui.exporters import render_export_buttons
 from ui.formatters import format_currency, format_currency_full, format_quantity, safe_pct
 from ui.insights import insight_anomalias
 
@@ -126,7 +127,7 @@ def _tab_prestador(df: pd.DataFrame, config: dict) -> None:
         if len(df_p) == 0:
             st.info("Sin datos para este prestador")
             return
-        _render_temporal_view(df_p, config, group_cols=["Prestador ID"], entity_name=prest_data[0]["desc"])
+        _render_temporal_view(df_p, config, group_cols=["Prestador ID"], entity_name=prest_data[0]["desc"], view_key="prestador")
     else:
         _render_comparativa(df, config, prest_data)
 
@@ -189,8 +190,12 @@ def _render_comparativa(df: pd.DataFrame, config: dict, prest_data: list[dict]) 
             if col in df_res.columns:
                 df_res[col] = df_res[col].apply(fmt)
         st.dataframe(df_res, use_container_width=True, hide_index=True)
-        csv = df_res.to_csv(index=False).encode("utf-8")
-        st.download_button("Descargar comparativa (CSV)", csv, "comparativa_prestadores.csv", "text/csv")
+        render_export_buttons(
+            df_res,
+            filename="comparativa_prestadores",
+            title=f"Comparativa — {metric_label} por Prestador",
+            key="anom_comparativa",
+        )
 
 
 # ============================================================================
@@ -224,7 +229,7 @@ def _tab_prestacion(df: pd.DataFrame, config: dict) -> None:
         st.info("Sin datos para esta prestación")
         return
 
-    _render_temporal_view(df_pr, config, group_cols=["Prestacion ID"], entity_name=prdesc)
+    _render_temporal_view(df_pr, config, group_cols=["Prestacion ID"], entity_name=prdesc, view_key="prestacion")
 
 
 # ============================================================================
@@ -251,7 +256,7 @@ def _tab_grupo(df: pd.DataFrame, config: dict) -> None:
         st.info("Sin datos para este grupo")
         return
 
-    _render_temporal_view(df_g, config, group_cols=[grouping], entity_name=choice)
+    _render_temporal_view(df_g, config, group_cols=[grouping], entity_name=choice, view_key="grupo")
 
 
 # ============================================================================
@@ -313,9 +318,12 @@ def _tab_ranking(df: pd.DataFrame, config: dict) -> None:
     show_cols.append("Severidad")
 
     st.dataframe(display[show_cols], use_container_width=True, hide_index=True)
-    csv = display[show_cols].to_csv(index=False).encode("utf-8")
-    st.download_button("Descargar alertas (CSV)", csv,
-                       f"alertas_{config['metric']}.csv", "text/csv")
+    render_export_buttons(
+        display[show_cols],
+        filename=f"alertas_{config['metric']}",
+        title="Ranking de Alertas",
+        key=f"anom_alertas_{config['metric']}",
+    )
 
 
 # ============================================================================
@@ -323,7 +331,7 @@ def _tab_ranking(df: pd.DataFrame, config: dict) -> None:
 # ============================================================================
 def _render_temporal_view(
     df: pd.DataFrame, config: dict,
-    group_cols: list[str], entity_name: str,
+    group_cols: list[str], entity_name: str, view_key: str = "",
 ) -> None:
     metric_label = METRIC_LABEL[config["metric"]]
     st.caption(
@@ -441,17 +449,23 @@ def _render_temporal_view(
             f"{p:+.1f}%" if (p := safe_pct(v - m, m)) is not None else "-"
             for v, m in zip(display["valor"], display["media_movil"])
         ]
-        st.dataframe(display[["Mes", "Valor real", "Esperado", "Desvío %"]],
-                     use_container_width=True, hide_index=True)
+        tabla_anom = display[["Mes", "Valor real", "Esperado", "Desvío %"]]
+        st.dataframe(tabla_anom, use_container_width=True, hide_index=True)
+        render_export_buttons(
+            tabla_anom,
+            filename=f"anomalias_{config['metric']}",
+            title=f"Detalle de anomalías — {entity_name}",
+            key=f"anom_detalle_{view_key}",
+        )
     else:
         st.success("No se detectaron anomalías con los parámetros actuales.")
 
     if config["analysis_type"] in ("estructural", "ambos"):
         st.divider()
-        _render_structural_section(df, config)
+        _render_structural_section(df, config, view_key=view_key)
 
 
-def _render_structural_section(df: pd.DataFrame, config: dict) -> None:
+def _render_structural_section(df: pd.DataFrame, config: dict, view_key: str = "") -> None:
     st.write("### Análisis Estructural — vs pares comparables")
     peer_cols = ["Prestacion ID", "Mes"]
 
@@ -484,3 +498,9 @@ def _render_structural_section(df: pd.DataFrame, config: dict) -> None:
         display["severidad_structural"] = display["severidad_structural"].apply(lambda x: f"{x:.2f}")
         display = display.rename(columns={"severidad_structural": "Severidad"})
     st.dataframe(display, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        display,
+        filename=f"estructural_{config['metric']}",
+        title="Análisis Estructural — vs pares comparables",
+        key=f"anom_estructural_{view_key}",
+    )

@@ -15,7 +15,7 @@ import streamlit as st
 
 logger = logging.getLogger(__name__)
 
-from core.cachekeys import df_fingerprint
+from ui.exporters import render_export_buttons
 from ui.insights import insight_concentracion, insight_evolucion
 from core.indec import fetch_inflation
 from core.simulator import aggregate_top_n
@@ -121,6 +121,13 @@ def _tabla_historico_pauta(df_time: pd.DataFrame, tick_texts: list[str]) -> None
     </div>
     """, unsafe_allow_html=True)
     st.dataframe(tabla, use_container_width=True)
+    render_export_buttons(
+        tabla,
+        filename="historico_pauta",
+        title="Histórico de pauta — Inflación INDEC vs. aumento otorgado",
+        key="sim_historico_pauta",
+        include_index=True,
+    )
     st.caption(
         "Pauta del INDEC (IPC mensual) precargada donde hay dato publicado. "
         "La fila **Aumento otorgado** queda reservada: se completará cuando "
@@ -364,6 +371,12 @@ def _tab_nomenclador(df: pd.DataFrame) -> None:
     df_display["Consumo Ideal"]    = df_display["Consumo Ideal"].apply(format_currency)
     df_display["Consumo Simulado"] = df_display["Consumo Simulado"].apply(format_currency)
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        df_display,
+        filename=f"consumo_por_{grouping.lower().replace(' ', '_')}",
+        title=f"Consumo por {grouping}",
+        key="sim_nomenclador",
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -407,6 +420,12 @@ def _tab_top_prestaciones(df: pd.DataFrame) -> None:
     df_display["Cantidad CM"]      = df_display["Cantidad CM"].apply(format_quantity)
     df_display["Valor Ofrecido"]   = df_display["Valor Ofrecido"].apply(format_currency_full)
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        df_display,
+        filename="top_prestaciones",
+        title="Top 20 Prestaciones por Consumo",
+        key="sim_top_prestaciones",
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -506,6 +525,12 @@ def _tab_megacuenta(df: pd.DataFrame) -> None:
     df_display["Consumo Ideal"]    = df_display["Consumo Ideal"].apply(format_currency)
     df_display["Consumo Simulado"] = df_display["Consumo Simulado"].apply(format_currency)
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        df_display,
+        filename="por_megacuenta",
+        title="Análisis por Megacuenta",
+        key="sim_megacuenta",
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -631,6 +656,12 @@ def _tab_comparativa(df_merged: pd.DataFrame, prestador_id: int | None) -> None:
     df_display["Valor Convenido a HOY"] = df_display["Valor Convenido a HOY"].apply(format_currency_full)
     df_display["Cantidad CM"]           = df_display["Cantidad CM"].apply(format_quantity)
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        df_display,
+        filename="comparativa_prestadores",
+        title=f"Comparativa de Valores — {choice}",
+        key="sim_comparativa",
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -642,13 +673,6 @@ def _tab_comparativa(df_merged: pd.DataFrame, prestador_id: int | None) -> None:
 # segundos y dejaba colgados los elementos "fantasma" de la página anterior.
 # La descarga CSV sigue incluyendo todo.
 _MAX_FILAS_TABLA = 1_000
-
-
-@st.cache_data(show_spinner=False, max_entries=5,
-               hash_funcs={pd.DataFrame: df_fingerprint})
-def _csv_completo(df: pd.DataFrame, cols: tuple) -> bytes:
-    """CSV de descarga cacheado: generarlo en cada rerun costaba segundos."""
-    return df[list(cols)].to_csv(index=False).encode("utf-8")
 
 
 def _tab_datos(df: pd.DataFrame) -> None:
@@ -672,6 +696,14 @@ def _tab_datos(df: pd.DataFrame) -> None:
 
     avg = df.groupby("Prestacion Desc")["% Aumento"].mean().sort_values(ascending=False)
     st.dataframe(avg, use_container_width=True)
+    avg_export = avg.round(2).reset_index()
+    avg_export["% Aumento"] = avg_export["% Aumento"].apply(lambda x: f"{x:.2f}%")
+    render_export_buttons(
+        avg_export,
+        filename="aumento_promedio_prestacion",
+        title="Aumento promedio por prestación",
+        key="sim_avg_aumento",
+    )
 
     st.markdown("""
     <div style="background:#FFF0F3; border-left:3px solid #E4002B;
@@ -701,8 +733,15 @@ def _tab_datos(df: pd.DataFrame) -> None:
             "La descarga CSV incluye el detalle completo."
         )
 
-    csv = _csv_completo(df, tuple(cols_show))
-    st.download_button("Descargar datos (CSV)", csv, "simulacion.csv", "text/csv")
+    # CSV: detalle completo (sin truncar). PDF: la tabla mostrada (formateada y
+    # acotada), que es lo razonable de imprimir.
+    render_export_buttons(
+        df_display,
+        filename="simulacion",
+        title="Datos Detallados de la Simulación",
+        key="sim_datos",
+        csv_df=df[cols_show],
+    )
 
 
 # ----------------------------------------------------------------------------

@@ -227,11 +227,16 @@ def render_simulator_controls(
     config["prestacion_valores"] = {}
     config["excluidas"]          = []
 
-    # ── Expander: Definir el aumento (flujo en capas) ──
-    with st.expander("Definir el aumento", expanded=True):
+    # ── Definir el aumento — capas combinables presentadas como acordeón ──
+    # Cada capa es un panel colapsable: al clickear su título se abre y muestra
+    # sus opciones. Las capas se COMBINAN (no son excluyentes): la precedencia
+    # es prestación > grupo > general. La capa 1 (general) arranca abierta; las
+    # opcionales (grupo, prestación), cerradas. Son expanders hermanos (no
+    # anidados) porque Streamlit no permite anidar expanders.
+    st.markdown("##### Definir el aumento")
+    st.caption("Abrí cada capa para configurarla. Se combinan: prestación pisa a grupo, y grupo pisa al general.")
 
-        # ── Capa 1: Aumento general (siempre) ─────────────────────────────
-        st.markdown("**1. Aumento general**")
+    with st.expander("1 · Aumento general", expanded=True):
         general = st.number_input(
             "Aumento general (%)", min_value=-100.0, max_value=500.0,
             value=15.0, step=0.5, key="sim_flat_pct",
@@ -266,10 +271,7 @@ def render_simulator_controls(
                     value=2.0, step=0.1, key="sim_pauta_pct",
                 )
 
-        st.divider()
-
-        # ── Capa 2: Ajustes por grupo de prácticas (opcional) ─────────────
-        st.markdown("**2. Ajustes por grupo de prácticas** · _opcional_")
+    with st.expander("2 · Ajustes por grupo de prácticas — opcional", expanded=False):
         usar_grupo = st.checkbox(
             "Asignar un % distinto a ciertos grupos",
             key="sim_usar_grupo",
@@ -301,10 +303,7 @@ def render_simulator_controls(
                         )
                         config["nomenclador_pcts"][nom] = pct
 
-        st.divider()
-
-        # ── Capa 3: Ajustes por prestación, % o $ (opcional) ──────────────
-        st.markdown("**3. Ajustes por prestación (% o $)** · _opcional_")
+    with st.expander("3 · Ajustes por prestación — % o $ — opcional", expanded=False):
         usar_prest = st.checkbox(
             "Cargar un % o monto $ propio en prestaciones puntuales",
             key="sim_usar_prest",

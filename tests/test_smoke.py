@@ -632,3 +632,26 @@ def test_clasificar_dataset_por_contenido():
     assert clasificar_dataset(["Prestador", "Valor Convenido a HOY"]) == "valores"
     assert clasificar_dataset(["Prestador", "Cantidad CM", "Importe CM"]) == "consumo"
     assert clasificar_dataset(["x", "y"]) is None
+
+
+# ----------------------------------------------------------------------------
+# ui.exporters — exportación unificada CSV / PDF (lógica pura, sin runtime)
+# ----------------------------------------------------------------------------
+def test_export_csv_lleva_bom_y_encabezados():
+    from ui.exporters import df_to_csv_bytes
+    df = pd.DataFrame({"Prestación": ["Consulta"], "Valor": ["$ 1.234,56"]})
+    raw = df_to_csv_bytes(df)
+    assert raw.startswith(b"\xef\xbb\xbf")          # BOM (Excel abre acentos)
+    assert "Prestación,Valor" in raw.decode("utf-8-sig")
+
+
+def test_export_pdf_es_pdf_valido_y_trunca():
+    from ui.exporters import _PDF_MAX_FILAS, _build_pdf
+    df = pd.DataFrame({"A": range(_PDF_MAX_FILAS + 50), "B": range(_PDF_MAX_FILAS + 50)})
+    data, truncado = _build_pdf(df, "Título", "subtítulo", include_index=False)
+    assert data[:5] == b"%PDF-"                     # firma de archivo PDF
+    assert truncado is True                         # superó el tope de filas
+
+    chico, truncado2 = _build_pdf(df.head(3), "Título", None, include_index=False)
+    assert chico[:5] == b"%PDF-"
+    assert truncado2 is False

@@ -16,6 +16,7 @@ from core.data_loader import (
     source_uses_uploads,
 )
 from core.simulator import apply_simulation, impact_metrics
+from ui.exporters import render_export_buttons
 from ui.formatters import format_currency, format_currency_full, format_int
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -284,8 +285,13 @@ def render() -> None:
         df_neg_display["% Aumento"]             = df_neg_display["% Aumento"].apply(lambda x: f"{x:.2f}%")
 
         st.dataframe(df_neg_display, use_container_width=True, hide_index=True)
-        csv = df_neg.to_csv(index=False).encode("utf-8")
-        st.download_button("Descargar tabla de negociación", csv, "negociacion.csv", "text/csv")
+        render_export_buttons(
+            df_neg_display,
+            filename="negociacion",
+            title="Tabla de Negociación — Valores por Prestación",
+            subtitle="Valor actual vs. valor ofrecido por prestación",
+            key="m1_negociacion",
+        )
 
     st.divider()
 
@@ -331,7 +337,15 @@ def _render_negociacion(
             row["Extrapauta mensual"] = format_currency_full(m["extrapauta_mensual"])
         rows.append(row)
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    df_metrics = pd.DataFrame(rows)
+    st.dataframe(df_metrics, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        df_metrics,
+        filename="metricas_negociacion",
+        title="Métricas de negociación",
+        subtitle=f"Impacto mensual = total / {n_meses_num} mes(es)",
+        key="m1_metricas",
+    )
 
 
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:

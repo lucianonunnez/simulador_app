@@ -20,6 +20,7 @@ from core.ml_predictor import (
     predecir_lightgbm,
     predecir_pablo,
 )
+from ui.exporters import render_export_buttons
 from ui.formatters import format_currency, format_quantity, safe_pct
 from ui.insights import insight_prediccion
 from ui.theme import (
@@ -164,10 +165,13 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
             f"{p:+.1f}%" if (p := safe_pct(pred - real, real)) is not None else "-"
             for pred, real in zip(display["prediccion"], display["real"])
         ]
-        st.dataframe(
-            display[["Mes", "Real", "Predicho", "Error %"]],
-            use_container_width=True,
-            hide_index=True,
+        tabla_pred = display[["Mes", "Real", "Predicho", "Error %"]]
+        st.dataframe(tabla_pred, use_container_width=True, hide_index=True)
+        render_export_buttons(
+            tabla_pred,
+            filename="prediccion_por_mes",
+            title="Predicción por mes — Real vs Predicho",
+            key="ml_prediccion",
         )
 
 
@@ -199,7 +203,14 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
             "N train": f"{m.get('n_train', 0):,}",
             "N test": f"{m.get('n_test', 0):,}",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    df_comp = pd.DataFrame(rows)
+    st.dataframe(df_comp, use_container_width=True, hide_index=True)
+    render_export_buttons(
+        df_comp,
+        filename="comparativa_modelos",
+        title="Comparativa de modelos — Métricas de evaluación",
+        key="ml_comparativa",
+    )
 
     st.caption(
         "**MAE** (Mean Absolute Error): error promedio en unidades originales. Menor = mejor. "
@@ -437,7 +448,14 @@ def _tab_sobre_modelos() -> None:
                 "N train": f"{m.get('n_train', 0):,}",
                 "N test": f"{m.get('n_test', 0):,}",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        df_entr = pd.DataFrame(rows)
+        st.dataframe(df_entr, use_container_width=True, hide_index=True)
+        render_export_buttons(
+            df_entr,
+            filename="metricas_entrenamiento",
+            title="Métricas finales de los modelos entrenados",
+            key="ml_entrenamiento",
+        )
 
     st.caption(
         "**Nota:** los modelos son estáticos (entrenados una vez y cargados desde "
