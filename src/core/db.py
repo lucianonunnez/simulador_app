@@ -1,73 +1,72 @@
 """
-Conexión y esquema de la base DuckDB local.
+Conexión y esquema de la base PostgreSQL en Supabase (schema: simulador).
 
-DuckDB es una base analítica embebida: un solo archivo (data/simulador.duckdb)
-en disco, sin servidor ni dependencias externas. Los datos NUNCA salen de la
-máquina -> cumple la restricción de datos médicos sensibles ("todo local").
+Los datos viven en el proyecto 'gestor-clientes' de Supabase, en un schema
+dedicado 'simulador' completamente separado de las otras tablas de ese proyecto.
 
-Por qué DuckDB y no cargar el Excel a RAM (como antes):
-  - Los datos viven en DISCO; a memoria sube solo lo que pide cada consulta.
-  - Es columnar y vectorizado: filtrar/agregar es rápido aunque haya millones
-    de filas.
-  - Si una consulta necesitara más RAM que la disponible, DuckDB derrama a
-    disco en vez de reventar (out-of-core). Por eso fijamos un techo de RAM.
+La URL de conexión se lee desde:
+  - st.secrets["supabase_db_url"]  (app Streamlit)
+  - Variable de entorno DATABASE_URL  (script CLI de ingesta)
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+import os
 
-import duckdb
+import psycopg2
+import psycopg2.extras
 
 logger = logging.getLogger(__name__)
 
-# La base vive dentro de data/ (gitignored): nunca se versiona ni se sube.
-DB_PATH = Path("data") / "simulador.duckdb"
+SCHEMA = "simulador"
 
-# Techo de RAM para las consultas. Lo que exceda, DuckDB lo derrama a disco.
-MEMORY_LIMIT = "2GB"
-
-# Tablas
 CONSUMO_TABLE = "consumo"
 VALORES_TABLE = "valores"
 INGEST_LOG_TABLE = "_ingest_log"
 
-# Grano del upsert. Como los datos se bajan "de a partes" por prestador (por el
-# límite de ~1M filas de MicroStrategy), el reemplazo es por (Prestador, Mes):
-# re-subir un prestador/mes pisa solo esas filas, sin tocar los demás.
 CONSUMO_KEY = ("Prestador ID", "Mes")
 VALORES_KEY = ("Prestador ID", "Mes Vigencia")
 
 
-def get_connection(read_only: bool = False) -> duckdb.DuckDBPyConnection:
-    """
-    Abre una conexión a la base local.
-
-    read_only=True para la app (permite varios lectores en paralelo).
-    read_only=False para el script de ingesta (único escritor).
-    """
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(DB_PATH), read_only=read_only)
+def _get_db_url() -> str:
+    """Devuelve la URL de conexión desde secrets o variable de entorno."""
     try:
-        con.execute(f"SET memory_limit = '{MEMORY_LIMIT}'")
+        import streamlit as st
+        return st.secrets["supabase_db_url"]
     except Exception:
-        # Si la versión de DuckDB no soporta el pragma, seguimos igual.
-        logger.warning("No se pudo fijar memory_limit=%s en DuckDB", MEMORY_LIMIT)
-    return con
+        pass
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "No se encontró la URL de la base de datos. "
+            "Configurá supabase_db_url en .streamlit/secrets.toml "
+            "o la variable de entorno DATABASE_URL."
+        )
+    return url
 
 
-def table_exists(con: duckdb.DuckDBPyConnection, name: str) -> bool:
-    """True si la tabla existe en la base."""
-    row = con.execute(
-        "SELECT 1 FROM information_schema.tables WHERE table_name = ?",
-        [name],
-    ).fetchone()
-    return row is not None
+def get_connection() -> psycopg2.extensions.connection:
+    """Abre una conexión PostgreSQL con search_path=simulador."""
+    url = _get_db_url()
+    return psycopg2.connect(url, options=f"-c search_path={SCHEMA}")
 
 
-def table_count(con: duckdb.DuckDBPyConnection, name: str) -> int:
+def table_exists(con: psycopg2.extensions.connection, name: str) -> bool:
+    """True si la tabla existe en el schema simulador."""
+    with con.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = %s AND table_name = %s",
+            [SCHEMA, name],
+        )
+        return cur.fetchone() is not None
+
+
+def table_count(con: psycopg2.extensions.connection, name: str) -> int:
     """Cantidad de filas de una tabla (0 si no existe)."""
     if not table_exists(con, name):
         return 0
-    return con.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+    with con.cursor() as cur:
+        cur.execute(f'SELECT COUNT(*) FROM "{name}"')
+        return cur.fetchone()[0]

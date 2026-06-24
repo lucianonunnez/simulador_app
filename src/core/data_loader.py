@@ -1,16 +1,10 @@
 """
-Carga de datos de consumo y valores desde DuckDB (local).
+Carga de datos de consumo y valores desde Supabase (PostgreSQL).
 
-Antes esto leía los Excel ENTEROS a RAM con pandas en cada sesión. Ahora los
-datos viven en una base DuckDB local (data/simulador.duckdb), construida por
-scripts/ingest.py a partir de los Excel descargados manualmente de
-MicroStrategy. Las consultas piden solo lo necesario (filtros opcionales por
-prestador y mes), así que:
-  - La RAM usada es una fracción de la de antes.
-  - Nada sale de la máquina (datos médicos sensibles -> todo local).
-
-Si la base todavía no existe (checkout nuevo, sin datos ingeridos), cae a un
-uploader manual en el sidebar para no dejar la app inutilizable.
+Los datos viven en el schema 'simulador' del proyecto 'gestor-clientes' de
+Supabase. Las consultas piden solo lo necesario (filtros opcionales por
+prestador y mes). Si la base no está configurada aún, la app cae al modo
+de upload manual para no quedar inutilizable.
 """
 
 from __future__ import annotations
@@ -27,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 from core.db import (
     CONSUMO_TABLE,
-    DB_PATH,
     VALORES_TABLE,
     get_connection,
     table_exists,
@@ -51,55 +44,29 @@ def _as_tuple(x: Optional[Iterable]) -> Optional[tuple]:
 
 
 # ============================================================================
-# CONSULTA A DUCKDB
+# CONSULTA A SUPABASE
 # ============================================================================
-def _db_fingerprint() -> str:
-    """
-    Identidad del estado de la base (mtime + tamaño del archivo).
 
-    Se pasa como argumento de las funciones cacheadas: cuando la ingesta
-    reescribe la base, el fingerprint cambia y el caché se invalida solo.
-    Antes, los datos recién ingeridos tardaban hasta 10 min (el TTL) en
-    aparecer en la app.
-    """
-    try:
-        s = DB_PATH.stat()
-        return f"{s.st_mtime_ns}-{s.st_size}"
-    except OSError:
-        return "no-db"
-
-
-@st.cache_resource(ttl=600, show_spinner=False)
-def _get_ro_connection():
-    """
-    Conexión de solo-lectura cacheada (DuckDB admite múltiples lectores).
-
-    Antes se abría y cerraba una conexión por consulta y por rerun: frágil y
-    más lento. La conexión cacheada se renueva sola cada 10 min (ttl).
-    """
-    return get_connection(read_only=True)
-
-
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def _query_table(
     table: str,
     mes_col: str,
     prestador_ids: Optional[tuple],
     meses: Optional[tuple],
-    db_state: str = "",
 ) -> Optional[pd.DataFrame]:
     """
-    Consulta una tabla de DuckDB con filtros opcionales empujados al SQL.
+    Consulta una tabla PostgreSQL con filtros opcionales.
 
     Devuelve None si la base/tabla no existe o no hay filas (para que la capa
-    de arriba muestre el fallback de upload manual). Cacheado 10 min, con
-    invalidación automática al reingerir (db_state = fingerprint de la base).
+    de arriba muestre el fallback de upload manual).
     """
-    if not DB_PATH.exists():
+    try:
+        con = get_connection()
+    except Exception:
+        logger.warning("No se pudo conectar a Supabase para '%s'", table)
         return None
 
     try:
-        con = _get_ro_connection().cursor()  # cursor propio: thread-safe
         if not table_exists(con, table):
             return None
 
@@ -108,62 +75,58 @@ def _query_table(
         params: list = []
 
         if prestador_ids:
-            placeholders = ",".join(["?"] * len(prestador_ids))
-            clauses.append(f'"Prestador ID" IN ({placeholders})')
-            params.extend(prestador_ids)
+            clauses.append('"Prestador ID" = ANY(%s)')
+            params.append(list(prestador_ids))
 
         if meses:
-            placeholders = ",".join(["?"] * len(meses))
-            clauses.append(f'"{mes_col}" IN ({placeholders})')
-            params.extend(meses)
+            clauses.append(f'"{mes_col}" = ANY(%s)')
+            params.append(list(meses))
 
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
 
-        df = con.execute(sql, params).fetch_df()
+        df = pd.read_sql_query(sql, con, params=params if params else None)
         return df if len(df) else None
-    except Exception as e:
-        # Detalle técnico al log; mensaje entendible al usuario (sin internals).
-        logger.exception("Error consultando la tabla '%s' en la base local", table)
-        if "lock" in str(e).lower():
-            st.error(
-                "La base de datos está siendo usada por otro proceso "
-                "(probablemente una ingesta en curso). Esperá a que termine "
-                "y recargá la página."
-            )
-        else:
-            st.error(
-                "No se pudieron cargar los datos. Reintentá en unos segundos; "
-                "si persiste, contactá al equipo técnico."
-            )
+    except Exception:
+        logger.exception("Error consultando la tabla '%s' en Supabase", table)
+        st.error(
+            "No se pudieron cargar los datos. Reintentá en unos segundos; "
+            "si persiste, contactá al equipo técnico."
+        )
         return None
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
 
 
-# NOTA sobre concurrencia (bug visto en vivo): la conexión cacheada con
-# st.cache_resource se COMPARTE entre los hilos de las sesiones de Streamlit,
-# y una conexión DuckDB no es thread-safe — dos consultas simultáneas se
-# pisaban y fetchone() devolvía None ("cannot unpack non-iterable NoneType").
-# Por eso cada consulta usa un CURSOR propio (con.cursor(), barato y seguro
-# por hilo). Además, las funciones cacheadas dejan PROPAGAR las excepciones
-# (st.cache_data no cachea errores): un fallo transitorio —p.ej. el lock de
-# una ingesta— no deja un None pegado por 10 minutos; el wrapper de afuera
-# loguea y devuelve None solo para ese rerun.
-
-
-@st.cache_data(ttl=600, show_spinner=False)
-def _catalogo_prestadores(db_state: str) -> Optional[list]:
+@st.cache_data(ttl=300, show_spinner=False)
+def _catalogo_prestadores() -> Optional[list]:
     """SELECT DISTINCT de prestadores (liviano) — para selectores."""
-    if not DB_PATH.exists():
+    try:
+        con = get_connection()
+    except Exception:
         return None
-    con = _get_ro_connection().cursor()
-    if not table_exists(con, CONSUMO_TABLE):
+    try:
+        if not table_exists(con, CONSUMO_TABLE):
+            return None
+        with con.cursor() as cur:
+            cur.execute(
+                f'SELECT DISTINCT "Prestador ID", "Prestador Desc" '
+                f'FROM "{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
+                f'ORDER BY "Prestador Desc"'
+            )
+            rows = cur.fetchall()
+        return rows or None
+    except Exception:
+        logger.exception("Error consultando el catálogo de prestadores")
         return None
-    rows = con.execute(
-        f'SELECT DISTINCT "Prestador ID", "Prestador Desc" '
-        f'FROM "{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
-        f'ORDER BY "Prestador Desc"'
-    ).fetchall()
-    return rows or None
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
 
 
 def get_prestadores_disponibles() -> Optional[list]:
@@ -171,47 +134,60 @@ def get_prestadores_disponibles() -> Optional[list]:
     Catálogo [(id, desc), ...] de prestadores SIN cargar las tablas completas.
 
     Permite que la UI renderice el selector primero y cargue después solo los
-    datos del prestador elegido (filtro empujado al SQL de DuckDB), en vez de
-    traer todo a RAM y filtrar en pandas. None si no hay base (modo upload).
+    datos del prestador elegido. None si no hay base configurada.
     """
     try:
-        return _catalogo_prestadores(_db_fingerprint())
+        return _catalogo_prestadores()
     except Exception:
         logger.exception("Error consultando el catálogo de prestadores")
         return None
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def _resumen_base_cached(db_state: str) -> Optional[dict]:
-    """Conteos livianos (COUNT/DISTINCT en SQL) para el panel de Inicio."""
-    if not DB_PATH.exists():
+@st.cache_data(ttl=300, show_spinner=False)
+def _resumen_base_cached() -> Optional[dict]:
+    """Conteos livianos para el panel de Inicio."""
+    try:
+        con = get_connection()
+    except Exception:
         return None
-    con = _get_ro_connection().cursor()
-    if not table_exists(con, CONSUMO_TABLE):
+    try:
+        if not table_exists(con, CONSUMO_TABLE):
+            return None
+        with con.cursor() as cur:
+            cur.execute(
+                f'SELECT COUNT(*), COUNT(DISTINCT "Prestador ID"), '
+                f'COUNT(DISTINCT "Mes") FROM "{CONSUMO_TABLE}"'
+            )
+            fila = cur.fetchone()
+        if fila is None:
+            return None
+        filas, prestadores, meses = fila
+        tarifas = 0
+        if table_exists(con, VALORES_TABLE):
+            with con.cursor() as cur:
+                cur.execute(f'SELECT COUNT(*) FROM "{VALORES_TABLE}"')
+                t = cur.fetchone()
+                tarifas = int(t[0]) if t else 0
+        return {
+            "filas": int(filas),
+            "prestadores": int(prestadores),
+            "meses": int(meses),
+            "tarifas": int(tarifas),
+        }
+    except Exception:
+        logger.exception("Error consultando el resumen de la base")
         return None
-    fila = con.execute(
-        f'SELECT COUNT(*), COUNT(DISTINCT "Prestador ID"), '
-        f'COUNT(DISTINCT "Mes") FROM "{CONSUMO_TABLE}"'
-    ).fetchone()
-    if fila is None:
-        return None
-    filas, prestadores, meses = fila
-    tarifas = 0
-    if table_exists(con, VALORES_TABLE):
-        t = con.execute(f'SELECT COUNT(*) FROM "{VALORES_TABLE}"').fetchone()
-        tarifas = int(t[0]) if t else 0
-    return {
-        "filas": int(filas),
-        "prestadores": int(prestadores),
-        "meses": int(meses),
-        "tarifas": int(tarifas),
-    }
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
 
 
 def resumen_base() -> Optional[dict]:
     """Estado de los datos cargados (para el panel de Inicio). None sin base."""
     try:
-        return _resumen_base_cached(_db_fingerprint())
+        return _resumen_base_cached()
     except Exception:
         logger.exception("Error consultando el resumen de la base")
         return None
@@ -221,9 +197,8 @@ def resumen_base() -> Optional[dict]:
 # INGESTA DESDE LA APP (detectar archivos nuevos en data/raw y unificarlos)
 # ============================================================================
 @st.cache_data(ttl=60, show_spinner=False)
-def _pendientes_cached(dir_state: tuple, db_state: str) -> dict:
-    """Escaneo de archivos sin ingerir (y cuáles necesitan mes), cacheado por
-    estado de carpeta + base (hashear un xlsx de 40 MB por rerun sería caro)."""
+def _pendientes_cached(dir_state: tuple) -> dict:
+    """Escaneo de archivos sin ingerir, cacheado por estado de carpeta."""
     from core import ingest_runner
 
     return ingest_runner.pendientes_detalle()
@@ -231,17 +206,10 @@ def _pendientes_cached(dir_state: tuple, db_state: str) -> dict:
 
 def _render_ingesta_pendiente() -> None:
     """
-    Si hay archivos nuevos en data/raw/ (consumo (1).csv, valores (2).xlsx,
-    etc., como los deja el navegador), ofrece ingerirlos y unificarlos a la
-    base desde la propia app — el equivalente a correr
-    `python scripts/ingest.py --archivar` en la terminal.
+    Si hay archivos nuevos en data/raw/ ofrece ingerirlos desde la propia app.
     """
     from core import ingest_runner
 
-    # Resultado de la última ingesta (quedó pendiente de mostrar tras el rerun).
-    # OJO: acá NO se puede usar st.expander — esta función se renderiza DENTRO
-    # del expander "Carga de datos" y Streamlit no permite anidarlos
-    # (StreamlitAPIException detectada con la app corriendo en real).
     if "_ingesta_resultado" in st.session_state:
         ok, salida = st.session_state.pop("_ingesta_resultado")
         if ok:
@@ -258,9 +226,7 @@ def _render_ingesta_pendiente() -> None:
         st.code("\n".join(lineas[-30:]) or "(sin salida)", language=None)
 
     try:
-        detalle = _pendientes_cached(
-            ingest_runner.estado_carpetas(), _db_fingerprint()
-        )
+        detalle = _pendientes_cached(ingest_runner.estado_carpetas())
     except Exception:
         logger.exception("Error buscando archivos pendientes de ingesta")
         return
@@ -278,10 +244,6 @@ def _render_ingesta_pendiente() -> None:
         "se mueve a `data/procesado/`."
     )
 
-    # Los consumos CRUDOS no traen el período en el archivo (verificado: la
-    # metadata de MicroStrategy solo guarda la ruta del reporte y la fecha de
-    # descarga). Se pide POR archivo; si el nombre incluye MM-YYYY, se
-    # precarga solo (convención: "consumo 12-2025.xlsx").
     mes_por_archivo: dict = {}
     if sin_mes:
         st.warning(
@@ -317,13 +279,7 @@ def _render_ingesta_pendiente() -> None:
             st.warning(f"Mes inválido (debe ser MM-YYYY): {', '.join(invalidos)}")
             return
         with st.spinner("Ingiriendo y unificando archivos (puede tardar varios minutos)..."):
-            # DuckDB no admite un escritor con lectores abiertos: cerrar la
-            # conexión read-only cacheada antes de lanzar la ingesta.
-            try:
-                _get_ro_connection().close()
-            except Exception:
-                logger.exception("No se pudo cerrar la conexión read-only")
-            st.cache_resource.clear()
+            st.cache_data.clear()
             ok, salida = ingest_runner.ejecutar_ingesta_detallada(mes_por_archivo)
         st.session_state["_ingesta_resultado"] = (ok, salida)
         st.cache_data.clear()
@@ -333,32 +289,19 @@ def _render_ingesta_pendiente() -> None:
 # ============================================================================
 # UPLOAD MANUAL + FUENTE DE DATOS
 # ============================================================================
-# Etiquetas del selector de fuente (también las lee module1 para decidir si
-# evitar el push-down y armar el selector desde los datos cargados).
 SRC_BASE = "Base (datos cargados)"
 SRC_SUBIDOS = "Solo archivos subidos"
 SRC_COMBINAR = "Combinar base + subidos"
 
 
 def source_uses_uploads() -> bool:
-    """True si la fuente elegida usa archivos subidos (solo o combinados).
-
-    module1 la consulta ANTES de cargar: cuando hay subidos no conviene el
-    push-down por prestador (se necesita el universo completo) y el selector
-    de prestadores debe salir de los datos, no del catálogo de la base.
-    """
+    """True si la fuente elegida usa archivos subidos (solo o combinados)."""
     return st.session_state.get("data_source_radio") in (SRC_SUBIDOS, SRC_COMBINAR)
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
 def _parse_upload(content: bytes, expected: tuple, numeric: tuple) -> pd.DataFrame:
-    """Parsea + limpia un archivo subido (cacheado por contenido).
-
-    Cacheado por los bytes del archivo: sin esto se re-parsearía el Excel en
-    CADA rerun (caro con archivos grandes). clean_dataset deja el archivo con
-    el mismo esquema que la base (numéricas coaccionadas, mes 'MM-YYYY', IDs
-    Int64), así combinar base + subido es consistente.
-    """
+    """Parsea + limpia un archivo subido (cacheado por contenido)."""
     df = load_excel_smart(content, set(expected))
     return clean_dataset(df, set(numeric))
 
@@ -390,7 +333,7 @@ def _leer_subido(uploaded_file, expected_cols: set, numeric_cols: set, label: st
 def _concat_datasets(
     base: Optional[pd.DataFrame], extra: Optional[pd.DataFrame]
 ) -> Optional[pd.DataFrame]:
-    """Une base + subido para el modo 'combinar' (unión de columnas, sin dupes)."""
+    """Une base + subido para el modo 'combinar'."""
     if base is None:
         return extra
     if extra is None:
@@ -412,25 +355,16 @@ def load_consumo_and_valores(
     """
     Carga consumo y valores según la FUENTE elegida en el sidebar.
 
-    Fuentes (selector "Carga de datos" → "Fuente de datos"):
-      - Base: lo ingerido en DuckDB (con push-down opcional por prestador/mes).
+    Fuentes:
+      - Base: lo ingerido en Supabase (con filtros opcionales por prestador/mes).
       - Solo archivos subidos: simula con lo que el usuario sube en el momento.
-      - Combinar base + subidos: une ambos (la base completa + los subidos).
-
-    Args:
-        prestador_ids: filtra por esos "Prestador ID" (push-down, solo aplica a
-            la fuente Base; con subidos/combinar se trae el universo completo).
-        meses: filtra por esos meses (idem, solo fuente Base).
-
-    Returns:
-        (df_consumo, df_valores). Cada uno puede ser None si no se cargó.
+      - Combinar base + subidos: une ambos.
     """
     pid = _as_tuple(prestador_ids)
     mes = _as_tuple(meses)
-    estado = _db_fingerprint()
 
-    base_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes, estado)
-    base_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes, estado)
+    base_consumo = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, pid, mes)
+    base_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes)
     base_ok = base_consumo is not None and base_valores is not None
 
     with st.sidebar.expander("Carga de datos", expanded=not base_ok):
@@ -446,12 +380,10 @@ def load_consumo_and_valores(
                  "(útil tras correr la ingesta).",
         ):
             st.cache_data.clear()
-            st.cache_resource.clear()
             st.rerun()
 
         _render_ingesta_pendiente()
 
-        # ── Subir archivos (siempre disponible) ──
         st.divider()
         st.markdown("**Subir archivos** _(opcional)_")
         st.caption(
@@ -468,7 +400,6 @@ def load_consumo_and_valores(
         sub_valores = _leer_subido(up_v, EXPECTED_VALORES_COLS, VALORES_NUMERIC_COLS, "Valores")
         hay_sub = sub_consumo is not None or sub_valores is not None
 
-        # ── Fuente de datos ──
         if hay_sub and base_ok:
             fuente = st.radio(
                 "Fuente de datos",
@@ -481,45 +412,32 @@ def load_consumo_and_valores(
             st.info("No hay base cargada: se simulará con los archivos subidos.")
         else:
             fuente = SRC_BASE
-            # Sin archivos subidos, limpiar una selección de fuente vieja para
-            # que source_uses_uploads() no quede "pegada" en subidos/combinar
-            # (y module1 recupere el push-down por prestador).
             st.session_state.pop("data_source_radio", None)
             if not base_ok:
                 st.caption(
                     "No hay datos en la base. Subí los archivos arriba o corré "
-                    "`python scripts/ingest.py`."
+                    "`python scripts/ingest.py` con DATABASE_URL configurado."
                 )
 
-    # ── Resolución de la fuente ──
     if fuente == SRC_SUBIDOS:
-        # Si falta un lado, se completa con la base (si existe) para poder mergear.
         c = sub_consumo if sub_consumo is not None else base_consumo
         v = sub_valores if sub_valores is not None else base_valores
         return c, v
 
     if fuente == SRC_COMBINAR:
-        # Combinar necesita la base COMPLETA (sin el filtro de push-down por
-        # prestador): se re-consulta sin filtros si la carga vino filtrada.
         full_c = base_consumo if pid is None else _query_table(
-            CONSUMO_TABLE, CONSUMO_MES_COL, None, None, estado)
+            CONSUMO_TABLE, CONSUMO_MES_COL, None, None)
         full_v = base_valores if pid is None else _query_table(
-            VALORES_TABLE, VALORES_MES_COL, None, None, estado)
+            VALORES_TABLE, VALORES_MES_COL, None, None)
         return _concat_datasets(full_c, sub_consumo), _concat_datasets(full_v, sub_valores)
 
-    # Fuente Base (comportamiento histórico, con push-down).
     return base_consumo, base_valores
 
 
 # ============================================================================
 # TRANSFORMACIONES CACHEADAS
 # ============================================================================
-# El merge y la normalización de tipos son pesados (to_numeric sobre todo el
-# dataset + pd.merge). Antes corrían en CADA rerun de Streamlit -> el indicador
-# de "Procesando datos..." reaparecía a cada interacción (el "parpadeo"). Acá
-# se cachean: solo se recalculan cuando cambian los datos de entrada.
-
-@st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
+@st.cache_data(ttl=300, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_merged_dataset(
     df_consumo: pd.DataFrame, df_valores: pd.DataFrame
 ) -> pd.DataFrame:
@@ -533,21 +451,16 @@ def get_merged_dataset(
 def load_merged_completo() -> Optional[pd.DataFrame]:
     """
     Consumo + valores COMPLETOS (sin filtro de prestador) ya mergeados, sin
-    renderizar UI.
-
-    Para vistas que comparan entre prestadores (tab Comparativa) cuando la
-    carga principal del módulo vino filtrada por el push-down. Todo cacheado:
-    después de la primera carga es gratis.
+    renderizar UI. Para vistas que comparan entre prestadores.
     """
-    estado = _db_fingerprint()
-    c = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, None, None, estado)
-    v = _query_table(VALORES_TABLE, VALORES_MES_COL, None, None, estado)
+    c = _query_table(CONSUMO_TABLE, CONSUMO_MES_COL, None, None)
+    v = _query_table(VALORES_TABLE, VALORES_MES_COL, None, None)
     if c is None or v is None:
         return None
     return get_merged_dataset(c, v)
 
 
-@st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
+@st.cache_data(ttl=300, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_normalized_consumo(df_consumo: pd.DataFrame) -> pd.DataFrame:
     """Normaliza tipos del dataset de consumo (cacheado). Usado por Mód. 2 y 3."""
     from core.simulator import normalize_dataframes

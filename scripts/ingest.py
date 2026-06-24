@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
-Ingesta idempotente de los Excel de MicroStrategy hacia DuckDB (local).
+Ingesta idempotente de los Excel de MicroStrategy hacia Supabase (PostgreSQL).
 
-Flujo de trabajo (cumple la política de IT: SOLO descarga manual + script):
-  1. Bajás los reportes de MicroStrategy a mano (por grupos de prestadores, por
-     el límite de ~1M filas) y los dejás en:
-         data/raw/consumo/*.xlsx   -> tabla 'consumo'
-         data/raw/valores/*.xlsx   -> tabla 'valores'
-  2. Corrés este script. Construye/actualiza data/simulador.duckdb.
+Flujo de trabajo:
+  1. Bajás los reportes de MicroStrategy a mano y los dejás en:
+         data/raw/consumo/*.xlsx   -> tabla simulador.consumo
+         data/raw/valores/*.xlsx   -> tabla simulador.valores
+  2. Corrés este script con DATABASE_URL configurado.
 
 Uso:
-    python scripts/ingest.py            # ingiere lo nuevo de data/raw/
-    python scripts/ingest.py --rebuild  # reconstruye la base desde cero
+    DATABASE_URL="postgresql://..." python scripts/ingest.py
+    python scripts/ingest.py --rebuild  # reconstruye borrando filas existentes
     python scripts/ingest.py --status   # muestra qué hay cargado
 
 Idempotencia:
-  - Cada archivo se identifica por hash SHA-256; si ya se ingirió, se saltea
-    (volver a correr el script no duplica datos).
-  - El upsert reemplaza SOLO las filas de los pares (Prestador ID, Mes) que
-    trae el archivo nuevo, sin pisar otros prestadores del mismo mes. Esto hace
-    seguro bajar los datos "de a partes".
+  - Cada archivo se identifica por hash SHA-256; si ya se ingirió, se saltea.
+  - El upsert reemplaza SOLO las filas de los pares (Prestador ID, Mes/Mes
+    Vigencia) del archivo nuevo, sin pisar otros prestadores del mismo mes.
 """
 
 from __future__ import annotations
@@ -32,8 +29,9 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import psycopg2
+import psycopg2.extras
 
-# Permite ejecutar el script desde la raíz del repo sin instalar el paquete.
 _SRC = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(_SRC))
 
@@ -41,10 +39,6 @@ from core import db  # noqa: E402
 from core import excel_utils as xu  # noqa: E402
 
 RAW_DIR = Path("data") / "raw"
-
-# Bandeja unificada: cualquier export se suelta acá (sin separar por carpeta);
-# el tipo se detecta por contenido y el mes desde el nombre del archivo.
-# Lo procesado OK se mueve a PROCESADO_DIR.
 INBOX_DIR = Path("data") / "a_procesar"
 PROCESADO_DIR = Path("data") / "procesado"
 
@@ -77,72 +71,98 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()
 
 
-def _ensure_log(con) -> None:
-    con.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {db.INGEST_LOG_TABLE} (
-            file_hash   VARCHAR PRIMARY KEY,
-            file_name   VARCHAR,
-            tipo        VARCHAR,
-            rows        BIGINT,
-            ingested_at TIMESTAMP
+def _clean_val(v):
+    """Convierte pandas NA/NaN a None para psycopg2."""
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return v
+
+
+def _ensure_log(con: psycopg2.extensions.connection) -> None:
+    """Crea la tabla de log de ingesta si no existe (safety net)."""
+    with con.cursor() as cur:
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS simulador."{db.INGEST_LOG_TABLE}" (
+                file_hash   VARCHAR PRIMARY KEY,
+                file_name   VARCHAR,
+                tipo        VARCHAR,
+                rows        BIGINT,
+                ingested_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+            """
         )
-        """
-    )
 
 
-def _already_ingested(con, file_hash: str) -> bool:
-    row = con.execute(
-        f"SELECT 1 FROM {db.INGEST_LOG_TABLE} WHERE file_hash = ?", [file_hash]
-    ).fetchone()
-    return row is not None
+def _already_ingested(con: psycopg2.extensions.connection, file_hash: str) -> bool:
+    with con.cursor() as cur:
+        cur.execute(
+            f'SELECT 1 FROM "{db.INGEST_LOG_TABLE}" WHERE file_hash = %s',
+            [file_hash],
+        )
+        return cur.fetchone() is not None
 
 
-def _align_to_table(con, table: str, df: pd.DataFrame) -> pd.DataFrame:
+def _align_to_table(con: psycopg2.extensions.connection, table: str, df: pd.DataFrame) -> pd.DataFrame:
     """
     Alinea las columnas del df al esquema de la tabla ya existente:
-    agrega las que falten (NULL) y descarta las de más, para que el esquema
-    quede estable entre archivos de descargas distintas.
+    agrega las que falten (NULL) y descarta las de más.
     """
-    cols = [
-        r[0]
-        for r in con.execute(
+    with con.cursor() as cur:
+        cur.execute(
             "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = ? ORDER BY ordinal_position",
-            [table],
-        ).fetchall()
-    ]
+            "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+            [db.SCHEMA, table],
+        )
+        cols = [r[0] for r in cur.fetchall()]
     return df.reindex(columns=cols)
 
 
-def _upsert(con, table: str, key: tuple, df: pd.DataFrame) -> None:
+def _upsert(con: psycopg2.extensions.connection, table: str, key: tuple, df: pd.DataFrame) -> None:
     """Reemplaza las filas de los (key) presentes en df e inserta las nuevas."""
-    if not db.table_exists(con, table):
-        con.register("df_new", df)
-        con.execute(f'CREATE TABLE "{table}" AS SELECT * FROM df_new')
-        con.unregister("df_new")
-        return
+    with con.cursor() as cur:
+        tabla_existe = db.table_exists(con, table)
 
-    df = _align_to_table(con, table, df)
+        if not tabla_existe:
+            # La tabla debería existir ya (creada por migración), pero como
+            # safety net la creamos dinámicamente con el esquema del DataFrame.
+            cols_def = ", ".join(f'"{c}" text' for c in df.columns)
+            cur.execute(f'CREATE TABLE IF NOT EXISTS simulador."{table}" ({cols_def})')
+        else:
+            df = _align_to_table(con, table, df)
 
-    keys_df = df[list(key)].drop_duplicates()
-    cond = " AND ".join(f't."{k}" IS NOT DISTINCT FROM kk."{k}"' for k in key)
+        # Borrar las filas que van a ser reemplazadas
+        keys_df = df[list(key)].drop_duplicates()
+        conditions = " AND ".join(f'"{k}" IS NOT DISTINCT FROM %s' for k in key)
+        for _, row in keys_df.iterrows():
+            cur.execute(
+                f'DELETE FROM "{table}" WHERE {conditions}',
+                [_clean_val(row[k]) for k in key],
+            )
 
-    con.register("df_new", df)
-    con.register("keys_new", keys_df)
-    con.execute(
-        f'DELETE FROM "{table}" AS t '
-        f'WHERE EXISTS (SELECT 1 FROM keys_new AS kk WHERE {cond})'
-    )
-    con.execute(f'INSERT INTO "{table}" SELECT * FROM df_new')
-    con.unregister("df_new")
-    con.unregister("keys_new")
+        # Insertar las filas nuevas
+        if len(df) == 0:
+            return
+
+        cols = list(df.columns)
+        col_names = ", ".join(f'"{c}"' for c in cols)
+        data = [
+            tuple(_clean_val(row[c]) for c in cols)
+            for _, row in df.iterrows()
+        ]
+        psycopg2.extras.execute_values(
+            cur,
+            f'INSERT INTO "{table}" ({col_names}) VALUES %s',
+            data,
+            page_size=500,
+        )
 
 
 def _archivar(path: Path, dest_dir: Path | None = None) -> None:
-    """Mueve un archivo ya procesado a <carpeta>/procesados/ (o al destino
-    indicado). La base DuckDB es la fuente unificada; los archivos de entrada
-    son solo material crudo."""
+    """Mueve un archivo ya procesado a la carpeta de destino."""
     dest_dir = dest_dir if dest_dir is not None else path.parent / "procesados"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / path.name
@@ -153,16 +173,7 @@ def _archivar(path: Path, dest_dir: Path | None = None) -> None:
 
 
 def _preparar_consumo(df: pd.DataFrame, path: Path, mes: str | None):
-    """
-    Completa las columnas que el export CRUDO de consumo no trae.
-
-    'Mes': el período no queda en el archivo -> se resuelve, en orden, desde
-    el NOMBRE del archivo ('05-2026-Consumo-1584.xlsx') o desde --mes.
-    'Convenio ID': el export trae un flag, no el ID -> queda NULL y el merge
-    degrada a Prestador + Prestación.
-
-    Devuelve el df listo, o None si falta el período.
-    """
+    """Completa las columnas que el export CRUDO de consumo no trae."""
     if "Mes" not in df.columns:
         mes_archivo = xu.mes_desde_nombre(path.name) or mes
         if mes_archivo:
@@ -176,18 +187,13 @@ def _preparar_consumo(df: pd.DataFrame, path: Path, mes: str | None):
             return None
     if "Convenio ID" not in df.columns:
         df["Convenio ID"] = pd.NA
-        print("    (export sin 'Convenio ID': queda NULL; "
-              "el merge usará Prestador + Prestación)")
+        print("    (export sin 'Convenio ID': queda NULL)")
     return df
 
 
 def _process_file(con, tipo: str | None, ds: dict | None, path: Path,
                   rebuild: bool, mes: str | None = None) -> tuple[int, bool]:
-    """Procesa un archivo. Devuelve (filas_insertadas, procesado_ok) — ok
-    incluye 'ya estaba ingerido' (es archivable).
-
-    Con tipo=None (bandeja data/a_procesar) el tipo se detecta por el
-    CONTENIDO del archivo (clasificar_dataset)."""
+    """Procesa un archivo. Devuelve (filas_insertadas, procesado_ok)."""
     file_hash = _file_hash(path)
     if not rebuild and _already_ingested(con, file_hash):
         print(f"  - {path.name}: ya ingerido, saltando")
@@ -206,8 +212,7 @@ def _process_file(con, tipo: str | None, ds: dict | None, path: Path,
     if tipo is None:
         tipo = xu.clasificar_dataset(df.columns)
         if tipo is None:
-            print(f"  ! {path.name}: no parece consumo ni valores "
-                  f"(sin 'Cantidad CM'/'Importe CM' ni 'Valor Convenido a HOY') — saltando")
+            print(f"  ! {path.name}: no parece consumo ni valores — saltando")
             return 0, False
         ds = DATASETS[tipo]
         print(f"    (detectado como '{tipo}')")
@@ -222,24 +227,24 @@ def _process_file(con, tipo: str | None, ds: dict | None, path: Path,
         print(f"  ! {path.name}: faltan columnas {sorted(miss)} — saltando")
         return 0, False
 
-    # Limpia filas de Total/Subtotal, duplicados exactos y tipa las numéricas.
     filas_antes = len(df)
     df = xu.clean_dataset(df, ds["numeric"])
     descartadas = filas_antes - len(df)
     if descartadas:
         print(f"    ({descartadas} fila(s) de total/sin clave/duplicadas descartadas)")
 
-    con.execute("BEGIN")
     try:
         _upsert(con, ds["table"], ds["key"], df)
-        con.execute(
-            f"INSERT INTO {db.INGEST_LOG_TABLE} VALUES (?, ?, ?, ?, ?) "
-            f"ON CONFLICT (file_hash) DO NOTHING",
-            [file_hash, path.name, tipo, len(df), datetime.now()],
-        )
-        con.execute("COMMIT")
+        with con.cursor() as cur:
+            cur.execute(
+                f'INSERT INTO "{db.INGEST_LOG_TABLE}" '
+                f'(file_hash, file_name, tipo, rows, ingested_at) '
+                f'VALUES (%s, %s, %s, %s, %s) ON CONFLICT (file_hash) DO NOTHING',
+                [file_hash, path.name, tipo, len(df), datetime.now()],
+            )
+        con.commit()
     except Exception as e:
-        con.execute("ROLLBACK")
+        con.rollback()
         print(f"  ! {path.name}: error al insertar ({e})")
         return 0, False
 
@@ -253,9 +258,9 @@ def _print_status(con) -> None:
         n = db.table_count(con, ds["table"])
         print(f"  - {ds['table']:<8}: {n:,} filas")
     if db.table_exists(con, db.INGEST_LOG_TABLE):
-        files = con.execute(
-            f"SELECT COUNT(*) FROM {db.INGEST_LOG_TABLE}"
-        ).fetchone()[0]
+        with con.cursor() as cur:
+            cur.execute(f'SELECT COUNT(*) FROM "{db.INGEST_LOG_TABLE}"')
+            files = cur.fetchone()[0]
         print(f"  - archivos ingeridos: {files}")
 
 
@@ -263,21 +268,17 @@ def _print_status(con) -> None:
 # MAIN
 # ============================================================================
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Ingesta de Excel -> DuckDB")
+    ap = argparse.ArgumentParser(description="Ingesta de Excel -> Supabase")
     ap.add_argument("--rebuild", action="store_true",
                     help="Borra y reconstruye la base desde cero")
     ap.add_argument("--status", action="store_true",
                     help="Solo muestra qué hay cargado y sale")
     ap.add_argument("--solo", metavar="ARCHIVO", default=None,
-                    help="Procesa únicamente el archivo con ese nombre exacto "
-                         "(permite asignar --mes distinto por archivo)")
+                    help="Procesa únicamente el archivo con ese nombre exacto")
     ap.add_argument("--archivar", action="store_true",
-                    help="Mueve los archivos procesados OK a data/raw/<tipo>/procesados/ "
-                         "para que la carpeta de entrada no acumule archivos viejos")
+                    help="Mueve los archivos procesados OK a procesados/")
     ap.add_argument("--mes", metavar="MM-YYYY", default=None,
-                    help="Período de los archivos de consumo SIN columna 'Mes' "
-                         "(el export crudo de MicroStrategy no la trae). "
-                         "Ej: --mes 01-2026")
+                    help="Período de los archivos de consumo SIN columna 'Mes'")
     args = ap.parse_args()
 
     if args.mes and not re.fullmatch(r"\d{2}-\d{4}", args.mes):
@@ -285,18 +286,14 @@ def main() -> int:
         return 1
 
     try:
-        con = db.get_connection(read_only=False)
+        con = db.get_connection()
     except Exception as e:
-        if "lock" in str(e).lower():
-            # DuckDB no permite un escritor mientras hay lectores abiertos.
-            print(
-                "ERROR: la base está bloqueada por otro proceso.\n"
-                "Cerrá la app Streamlit (que mantiene lectores abiertos) "
-                "antes de correr la ingesta, y reintentá."
-            )
-            return 1
-        raise
+        print(f"ERROR: no se pudo conectar a la base de datos.\n{e}")
+        print("Asegurate de tener DATABASE_URL configurado.")
+        return 1
+
     _ensure_log(con)
+    con.commit()
 
     if args.status:
         _print_status(con)
@@ -305,16 +302,15 @@ def main() -> int:
 
     if args.rebuild:
         print("Reconstruyendo base desde cero...")
-        for ds in DATASETS.values():
-            con.execute(f'DROP TABLE IF EXISTS "{ds["table"]}"')
-        con.execute(f"DROP TABLE IF EXISTS {db.INGEST_LOG_TABLE}")
-        _ensure_log(con)
+        with con.cursor() as cur:
+            for ds in DATASETS.values():
+                cur.execute(f'DELETE FROM simulador."{ds["table"]}"')
+            cur.execute(f'DELETE FROM simulador."{db.INGEST_LOG_TABLE}"')
+        con.commit()
 
     total = 0
     for tipo, ds in DATASETS.items():
         ds["dir"].mkdir(parents=True, exist_ok=True)
-        # Los exports de MicroStrategy vienen como xlsx o CSV (encoding variable);
-        # load_excel_smart detecta el formato por contenido.
         files = sorted([*ds["dir"].glob("*.xlsx"), *ds["dir"].glob("*.csv")])
         if args.solo:
             files = [p for p in files if p.name == args.solo]
@@ -325,10 +321,7 @@ def main() -> int:
             if ok and args.archivar:
                 _archivar(path)
 
-    # Bandeja unificada: se suelta CUALQUIER export en data/a_procesar/ (sin
-    # separar por carpeta), el tipo se detecta por contenido y el mes desde el
-    # nombre ('05-2026-Consumo-1584.xlsx'). Lo procesado se mueve SIEMPRE a
-    # data/procesado/ (es el contrato de la bandeja).
+    # Bandeja unificada
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
     PROCESADO_DIR.mkdir(parents=True, exist_ok=True)
     files = sorted([*INBOX_DIR.glob("*.xlsx"), *INBOX_DIR.glob("*.csv")])
