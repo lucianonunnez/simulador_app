@@ -47,9 +47,23 @@ def _get_db_url() -> str:
 
 
 def get_connection() -> psycopg2.extensions.connection:
-    """Abre una conexión PostgreSQL con search_path=simulador."""
+    """Abre una conexión PostgreSQL con search_path=simulador.
+
+    El search_path se fija por DOS vías a propósito: el parámetro de arranque
+    `options` (lo toma la conexión directa) y un `SET` explícito tras conectar.
+    Algunos poolers pueden no propagar `options`, así que el `SET` garantiza
+    que las consultas sin schema-qualify ('FROM consumo') resuelvan a
+    'simulador' tanto en local como deployado contra el Session Pooler.
+    """
     url = _get_db_url()
-    return psycopg2.connect(url, options=f"-c search_path={SCHEMA}")
+    con = psycopg2.connect(url, options=f"-c search_path={SCHEMA},public")
+    try:
+        with con.cursor() as cur:
+            cur.execute(f"SET search_path TO {SCHEMA}, public")
+        con.commit()
+    except Exception:
+        con.rollback()
+    return con
 
 
 def table_exists(con: psycopg2.extensions.connection, name: str) -> bool:

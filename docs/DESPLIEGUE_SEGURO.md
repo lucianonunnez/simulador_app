@@ -1,16 +1,41 @@
 # 🔒 Despliegue seguro — Simulador CM
 
-> Cómo correr la app de forma segura en la notebook, sirviéndola por IP en la LAN
-> de Swiss Medical para una demo. Pensado **como un experto en ciberseguridad**.
+> Seguridad para los dos modos de despliegue: **(A) Streamlit Community Cloud +
+> Supabase** (el modo actual) y **(B) local en la LAN** (alternativa offline).
+> Pensado **como un experto en ciberseguridad**.
 >
-> **Modelo de amenaza:** notebook en la red corporativa, varios ejecutivos se
-> loguean por IP, datos de prestadores confidenciales, **todo local** (sin nube).
-> Los datos NUNCA son a nivel paciente (siempre agregado por prestador), pero
-> igual son sensibles y no deben salir de la máquina.
+> **Modelo de amenaza (modo nube):** app pública en Streamlit Cloud detrás de
+> login, datos en Supabase (PostgreSQL, región `sa-east-1`). Los datos NUNCA son
+> a nivel paciente (siempre agregado por prestador), pero son sensibles: el
+> control de acceso (login + connection string secreta + aislamiento de schema)
+> es lo que los protege.
 
 ---
 
-## Checklist rápido (antes de cada demo)
+## A. Modo nube — Streamlit Community Cloud + Supabase (actual)
+
+Checklist de seguridad para el deploy en la nube:
+
+- [ ] **Secrets en el panel de Streamlit Cloud** (Settings → Secrets), nunca en el
+      repo: `cookie_key` fuerte, hashes bcrypt por usuario, `supabase_db_url`.
+- [ ] **Connection string = Session Pooler** con la password de la base. Tratarla
+      como secreto; rotarla si se filtró (Supabase → Settings → Database → Reset
+      database password).
+- [ ] **Schema `simulador` aislado**: no exponerlo por la API REST (PostgREST
+      publica solo `public`). Verificado con los advisors de seguridad de Supabase.
+- [ ] **Login bcrypt** (cost ≥ 12), password único por persona, `cookie_expiry_days = 1`.
+- [ ] **Rate-limit / lockout** de login activo (`src/core/` ya lo implementa).
+- [ ] Correr `get_advisors` de Supabase (security) tras cada cambio de schema.
+- [ ] El repo es **privado** o, si es público, **sin** secrets ni datos versionados.
+
+> ⚠️ En modo nube **no** aplican Caddy, el firewall de Windows ni el binding por IP
+> (eso es del modo local, sección B). Streamlit Cloud ya sirve por HTTPS.
+
+---
+
+## B. Modo local (LAN) — alternativa offline
+
+### Checklist rápido (antes de cada demo local)
 
 - [ ] BitLocker activo en el disco.
 - [ ] `secrets.toml` con `cookie_key` fuerte y passwords únicos por persona.
@@ -95,10 +120,12 @@ enableXsrfProtection = true
 
 ## 6. Datos en reposo
 
-- **BitLocker** (cifrado de disco completo) activo: es el control compensatorio de
-  tener datos sensibles en una notebook. Cubre `data/` y `data/simulador.duckdb`.
-- La base DuckDB y los Excel en `data/` están en `.gitignore`: no se versionan ni
-  se suben jamás.
+- **Modo nube:** los datos viven en **Supabase** (cifrado en reposo gestionado por
+  Supabase/AWS). El control de acceso es la connection string secreta + el login
+  de la app. El schema `simulador` está aislado y no expuesto por la API pública.
+- **Modo local:** **BitLocker** (cifrado de disco completo) como control
+  compensatorio si hay Excel sensibles en la notebook durante la ingesta.
+- Los Excel en `data/raw/` están en `.gitignore`: no se versionan ni se suben jamás.
 
 ## 7. Auditoría de acceso
 

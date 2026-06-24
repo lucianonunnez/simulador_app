@@ -3,15 +3,16 @@
 > Documento de referencia. Resume cómo está armado el proyecto hoy y el camino
 > recomendado para llevarlo a "producto serio" sin reescribir todo de una.
 >
-> **Contexto al momento de escribir esto:** objetivo = producto serio/productivo,
-> pero hoy se ejecuta local en la compu, en fase de pruebas. Tema compliance de
-> datos médicos en cloud → pendiente de definir (lo salteamos por ahora).
+> **Contexto:** objetivo = producto serio/productivo. La app se despliega en
+> **Streamlit Community Cloud** y los datos viven en **Supabase** (PostgreSQL).
 >
-> **🔒 Decisión tomada (Fase 1):** la capa de datos es **DuckDB local**, NO
-> Supabase. Motivo: los datos médicos/de prestadores no pueden salir de la
-> máquina ("todo local") y no hay acceso a infra cloud aprobada todavía.
-> Supabase/PostgreSQL queda como **fase futura de nube**, cuando haya acceso a
-> AWS + aprobación de compliance. Ver `memory/simulador-cm-datos-decision.md`.
+> **🔒 Decisión tomada:** la capa de datos es **Supabase/PostgreSQL** (proyecto
+> `gestor-clientes`, región AWS `sa-east-1`), en un **schema `simulador`
+> dedicado** aislado del resto de tablas del proyecto. El hosting cloud de los
+> datos (agregados por prestador, **nunca** a nivel paciente) está **aprobado**.
+> Reemplaza el approach anterior de DuckDB local. Para conectar desde la nube se
+> usa el **Session Pooler** (IPv4); la conexión directa (IPv6) no funciona desde
+> Streamlit Cloud.
 
 ---
 
@@ -22,18 +23,18 @@ Resuelven capas distintas. No hay que elegir entre uno y otro.
 | Pieza | Rol | Capa |
 |---|---|---|
 | **Streamlit** | UI + lógica + servidor, todo junto en Python | Frontend **y** backend |
-| **DuckDB local** | Dónde viven los datos (Excel bajado a mano → DuckDB) | Datos |
+| **Supabase (PostgreSQL)** | Dónde viven los datos (Excel bajado a mano → schema `simulador`) | Datos |
 | **models/** | Modelos ML pre-entrenados (LightGBM + red neuronal) | ML |
 | **streamlit-authenticator + secrets.toml** | Login (usuarios con hash bcrypt hardcodeado) | Auth |
 | **Docker** | Empaqueta la app para desplegarla | Deploy/infra |
 
-- **DuckDB** (hoy) y **Supabase** (futuro cloud) reemplazan la capa de datos, NO a Streamlit.
+- **Supabase (PostgreSQL)** reemplaza la capa de datos (antes DuckDB local), NO a Streamlit.
 - **Docker** no es alternativa a nada: es *cómo* se despliega. Se queda igual.
 - **Streamlit** eventualmente se reemplaza por un frontend real, pero recién en la última fase.
 
-Los datos se descargan a mano de MicroStrategy, se cargan a una **base DuckDB
-local** con `scripts/ingest.py`, y `src/core/data_loader.py` los **consulta con
-filtros** (no carga todo a RAM como hacía antes con Excel + pandas).
+Los datos se descargan a mano de MicroStrategy, se cargan a **Supabase
+(PostgreSQL)** con `scripts/ingest.py`, y `src/core/data_loader.py` los
+**consulta con filtros** (no carga todo a RAM como hacía antes con Excel + pandas).
 
 ---
 
@@ -82,14 +83,16 @@ solo está acoplado a Streamlit por dentro (usa `st.cache_data`, `st.error`, etc
 - Storage para archivos + Row Level Security + API accesible desde cualquier lado.
 - Un solo origen de datos en vez de "tirame el Excel de Power BI".
 
-### ⚠️ Freno a resolver antes de producción
-Son **datos médicos sensibles**. Mandarlos a Supabase cloud (servidores en EE.UU.)
-probablemente choque con compliance de Swiss Medical. Opciones:
-- Confirmar aprobación con seguridad/legales, o
-- Usar **Supabase self-hosted** (on-premise), o
-- Trabajar con **datos anonimizados**.
-
-(Para la fase de pruebas local esto se saltea, pero hay que definirlo antes de productivo.)
+### ✅ Compliance de datos en la nube — resuelto
+Son **datos sensibles** (agregados por prestador, **nunca** a nivel paciente).
+El hosting en Supabase cloud está **aprobado**. Mitigaciones aplicadas:
+- Los datos viven en un **schema `simulador` dedicado**, aislado del resto del
+  proyecto y **no expuesto** por la API REST pública (PostgREST solo publica
+  `public`); el acceso es por conexión directa autenticada (psycopg2).
+- Región **`sa-east-1`** (São Paulo), no EE.UU.
+- Acceso a la app por login con **bcrypt** (cost 12) y cookie firmada.
+- La connection string es un **secreto** (Streamlit Secrets / `DATABASE_URL`),
+  nunca versionado. Se revisan los `get_advisors` de Supabase tras cambios de schema.
 
 ---
 
@@ -103,21 +106,21 @@ Como hoy se prueba en la compu, **no** tiene sentido el split completo todavía.
   Clave: una vez que `core/` es Python puro, se puede envolver en FastAPI
   *o* seguir usándolo desde Streamlit sin tocar nada.
 
-### 🟡 Fase 1 — Datos a DuckDB local (alto impacto) ✅ en curso
-- Base **DuckDB** embebida (`data/simulador.duckdb`), tablas `consumo` y `valores`.
-- Script de ingesta idempotente: Excel (bajado a mano) → DuckDB, con upsert por
-  `(Prestador ID, Mes)` (`scripts/ingest.py`).
-- Reescrito **solo** `data_loader.py` para consultar DuckDB en vez de leer Excel.
-- Todo lo demás (módulos, ML, UI) **no se toca**. Streamlit sigue igual.
-- **Por qué DuckDB y no Supabase ahora:** datos médicos = todo local, sin nube.
-  DuckDB da las mismas ventajas (SQL con filtros, no cargar todo a RAM) sin sacar
-  los datos de la máquina. La nube (Supabase/Postgres) queda para cuando haya
-  infra aprobada (ver Fase futura).
+### 🟡 Fase 1 — Datos a Supabase (PostgreSQL) ✅ hecho
+- Base **Supabase/PostgreSQL**, schema `simulador`, tablas `consumo` y `valores`.
+- Script de ingesta idempotente: Excel (bajado a mano) → Supabase, con upsert por
+  `(Prestador ID, Mes)` (`scripts/ingest.py`, usando `DATABASE_URL`).
+- Reescrito **solo** `data_loader.py` (y `core/db.py`) para consultar Supabase vía
+  psycopg2 en vez de leer Excel. Todo lo demás (módulos, ML, UI) **no se tocó**.
+- **Historial:** una etapa intermedia usó DuckDB local (cuando la nube no estaba
+  aprobada). Con el hosting aprobado se migró a Supabase para poder desplegar en
+  Streamlit Community Cloud y que varios usuarios compartan el mismo origen de datos.
 
-### 🟣 Fase futura — Nube (cuando haya AWS + compliance aprobado)
-- Migrar de DuckDB a **PostgreSQL** (Supabase self-hosted o AWS).
-- Esquema en estrella con `dim_prestador` (coordinación) para la comparativa por
-  coordinación. El SQL del `data_loader` cambia poco (mismo modelo relacional).
+### 🟣 Fase futura — Modelado dimensional
+- **✅ Hecho:** migración a PostgreSQL (Supabase).
+- Pendiente: esquema en estrella con `dim_prestador` (coordinación) para la
+  comparativa por coordinación. El SQL del `data_loader` cambia poco (mismo
+  modelo relacional).
 
 ### 🟠 Fase 2 — Backend real
 - Envolver `core/` en FastAPI. Streamlit pasa a consumir la API.
@@ -131,16 +134,15 @@ Como hoy se prueba en la compu, **no** tiene sentido el split completo todavía.
 
 ## 5. Recomendación concreta
 
-Se arrancó por **Fase 0 + Fase 1** (DuckDB local): es lo que más valor da con
-menos riesgo, y deja la base lista para todo lo demás. Streamlit se queda de
-"frontend provisorio" mientras se valida el modelo de datos.
+Se arrancó por **Fase 0 + Fase 1**: es lo que más valor da con menos riesgo, y
+deja la base lista para todo lo demás. Streamlit se queda de "frontend
+provisorio" mientras se valida el modelo de datos.
 
 **Estado / próximos pasos:**
 - **✅ Fase 0** — borrado código muerto; parseo de Excel extraído a `excel_utils.py`.
-- **✅ Fase 1** — base DuckDB + `scripts/ingest.py` + `data_loader` que consulta SQL.
-- **⏭️ Hardening de seguridad** — ver `docs/DESPLIEGUE_SEGURO.md` (binding LAN,
-  firewall, auth, BitLocker, auditoría de login).
-- **⏭️ Fase futura** — migrar a PostgreSQL cuando haya nube aprobada.
+- **✅ Fase 1** — datos en Supabase (PostgreSQL) + `scripts/ingest.py` + `data_loader` que consulta SQL.
+- **⏭️ Deploy** — Streamlit Community Cloud (ver `docs/DESPLIEGUE_SEGURO.md`).
+- **⏭️ Fase futura** — modelado dimensional (`dim_prestador`) y, eventualmente, backend FastAPI.
 
 ---
 

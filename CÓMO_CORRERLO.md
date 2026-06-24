@@ -30,15 +30,20 @@ streamlit run src/streamlit_app.py
 
 Se abre solo en el navegador en `http://localhost:8501`.
 
-La app consulta la base local **`data/simulador.duckdb`**. Si todavía no la
-construiste, dejá los Excel en `data/raw/consumo/` y `data/raw/valores/` y corré
-la ingesta una vez:
+La app consulta **Supabase** (PostgreSQL, schema `simulador`). Configurá la
+connection string en `.streamlit/secrets.toml` (clave `supabase_db_url`, copiala
+del **Session Pooler** del proyecto — ver `.streamlit/secrets.toml.example`).
+
+Para cargar datos, dejá los Excel en `data/raw/consumo/` y `data/raw/valores/` y
+corré la ingesta una vez (apuntando `DATABASE_URL` al mismo pooler):
 
 ```bash
+export DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres"
 python scripts/ingest.py
 ```
 
-(Si no hay base, la app igual te deja subir los Excel a mano desde el panel lateral.)
+(Si no hay datos en la base, la app igual te deja subir los Excel a mano desde el
+panel lateral para simular en el momento.)
 
 ---
 
@@ -53,10 +58,9 @@ docker run -p 8501:8501 simulador-cm
 
 Luego abrir `http://localhost:8501`.
 
-> ⚠️ Nota: la imagen Docker **no** incluye la carpeta `data/` (por diseño, para no
-> meter datos sensibles en la imagen). Con Docker, montá un volumen con la base
-> DuckDB ya construida, o subí los Excel a mano desde el panel lateral. Para una
-> demo rápida, usá la **Opción A**.
+> ⚠️ Nota: la imagen Docker lee los datos desde **Supabase** (configurá
+> `supabase_db_url` vía variable de entorno o secrets montados). No incluye datos
+> en la imagen. Para una demo rápida, usá la **Opción A**.
 
 ---
 
@@ -72,13 +76,14 @@ La app pide usuario y contraseña. Los usuarios están definidos en
 ```
 ├── src/                 Código de la app (Streamlit)
 ├── models/              Modelos ML pre-entrenados (LightGBM + red neuronal)
-├── data/                Base DuckDB local + Excel crudos en data/raw/ (NO versionado)
+├── data/                Excel crudos en data/raw/ para la ingesta (NO versionado)
 ├── .streamlit/          Configuración visual + credenciales (secrets.toml)
 ├── Dockerfile           Para correr en contenedor / desplegar
 ├── requirements.txt     Dependencias de Python
 └── CÓMO_CORRERLO.md     Este archivo
 ```
 
-> 🔒 **Seguridad:** este paquete contiene credenciales reales y datos médicos en
-> `.streamlit/secrets.toml` y `data/`. No lo subas a repositorios públicos ni lo
-> compartas por canales abiertos.
+> 🔒 **Seguridad:** `.streamlit/secrets.toml` contiene credenciales reales (login
+> + connection string de Supabase) y `data/raw/` puede contener Excel sensibles.
+> Ambos están gitignored. No los subas a repos públicos ni los compartas por
+> canales abiertos.

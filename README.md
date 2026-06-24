@@ -26,25 +26,30 @@ Aplicación interna para análisis y simulación de costos médicos.
 - **Visualización:** Plotly
 - **ML:** scikit-learn + LightGBM
 - **Auth:** streamlit-authenticator
-- **Almacenamiento de datos:** DuckDB local (`data/simulador.duckdb`)
+- **Almacenamiento de datos:** Supabase (PostgreSQL, schema `simulador`)
+- **Deploy:** Streamlit Community Cloud
 
 ## Datos
 
 Los datos se descargan **manualmente** de MicroStrategy (política de IT: sin
-sincronización automática) y se dejan en `data/raw/`. Luego se cargan a la base
-DuckDB local con el script de ingesta:
+sincronización automática) y se dejan en `data/raw/`. Luego se cargan a **Supabase**
+(schema `simulador`) con el script de ingesta, apuntando `DATABASE_URL` al
+**Session Pooler** del proyecto:
 
 ```bash
 # Dejar los Excel en data/raw/consumo/ y data/raw/valores/, después:
+export DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres"
 python scripts/ingest.py            # ingesta incremental e idempotente
 python scripts/ingest.py --rebuild  # reconstruye la base desde cero
 python scripts/ingest.py --status   # ver qué hay cargado
 ```
 
-Los datos médicos/de prestadores **nunca salen de la máquina** (todo local).
-Ver `FUENTE_DATOS.md` (extracción) y `docs/DESPLIEGUE_SEGURO.md` (seguridad).
+Los datos viven en Supabase (PostgreSQL, AWS `sa-east-1`), en un schema
+`simulador` **aislado** del resto del proyecto y no expuesto por la API REST
+pública. Son siempre **agregados por prestador** (nunca a nivel paciente). Ver
+`FUENTE_DATOS.md` (extracción) y `docs/DESPLIEGUE_SEGURO.md` (seguridad).
 
 ## Estado
 
-🚧 En construcción — Fase 1 (datos a DuckDB local) en curso.
-
+🚧 En construcción — datos migrados a Supabase (PostgreSQL); deploy en Streamlit
+Community Cloud.

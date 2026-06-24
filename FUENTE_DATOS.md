@@ -98,16 +98,16 @@ Ir con un **grupo de prestadores comparables por coordinación**. Eso:
 
 ## 7. 🔗 Cómo esto se conecta con la arquitectura (ver ARQUITECTURA.md)
 
-Esta info **refuerza la decisión de mover los datos a DuckDB local (Fase 1)**.
-DuckDB da los mismos beneficios que una base SQL en la nube, pero **sin sacar los
-datos de la máquina** (clave por ser datos médicos sensibles → todo local):
+Esta info **refuerza la decisión de mover los datos a una base SQL (Supabase /
+PostgreSQL)**. La base elimina el dolor del límite de export y el "bajar de a
+partes":
 
 - **El límite de 1M filas de MicroStrategy y el bajar "de a partes" es exactamente
-  el dolor que la base elimina.** Una vez que los datos están en DuckDB:
+  el dolor que la base elimina.** Una vez que los datos están en Supabase:
   - No hay límite de export → se consulta solo lo que se necesita.
-  - El trade-off del "Caso 1 vs Caso 2" se diluye: DuckDB es columnar e indexa,
-    así que podés tener **todo** y que igual sea **rápido** (consultás por
-    prestador/período, no cargás el millón de filas a RAM como hacía pandas).
+  - El trade-off del "Caso 1 vs Caso 2" se diluye: PostgreSQL indexa por
+    `(Prestador ID, Mes)`, así que podés tener **todo** y que igual sea **rápido**
+    (consultás por prestador/período, no cargás el millón de filas a RAM como pandas).
 - **La comparativa por coordinación (Mejora 1)** se vuelve trivial en SQL: es un
   `JOIN` con una tabla de coordinaciones + filtro. Conviene modelar la tabla de
   **coordinaciones/coordinadores** cuando se construya esa feature.
@@ -117,10 +117,9 @@ datos de la máquina** (clave por ser datos médicos sensibles → todo local):
 
 > 💡 **Sugerencia para la reu:** en vez de plantear "rápido pero incompleto vs
 > completo pero lento" (Caso 1 vs Caso 2 con la arquitectura de Excel), se puede
-> plantear **"pasamos a una base de datos local y dejamos de elegir"** — tenés
-> todo Y rápido, sin que los datos salgan de la máquina. El costo es armar la
-> ingesta una vez (ya hecho). La nube (PostgreSQL) queda para cuando haya infra
-> aprobada.
+> plantear **"pasamos a una base de datos y dejamos de elegir"** — tenés todo Y
+> rápido. El costo es armar la ingesta una vez (ya hecho). Los datos viven en
+> Supabase (PostgreSQL, schema `simulador` aislado).
 
 ---
 
