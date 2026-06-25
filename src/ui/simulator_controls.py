@@ -212,7 +212,7 @@ def render_simulator_controls(
             [meses_dict[l] for l in seleccionados] if seleccionados else list(meses_dict.values())
         )
     else:
-        st.info("El dataset no tiene columna 'Mes' — se usan todos los datos.")
+        st.caption("Sin columna 'Mes' — se usan todos los períodos.")
         config["meses_raw"] = []
 
     # ── Scope para inputs ──

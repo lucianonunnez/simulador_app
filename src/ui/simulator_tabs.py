@@ -133,7 +133,7 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
     st.subheader("Evolución Temporal del Consumo")
 
     if "Mes" not in df_filtered.columns:
-        st.info("El dataset no tiene columna 'Mes'.")
+        st.caption("Sin columna 'Mes' — la evolución temporal no está disponible.")
         return
 
     df_time = df_filtered.groupby("Mes")[["Cantidad CM", "Importe CM"]].sum().reset_index()
@@ -435,7 +435,7 @@ def _tab_megacuenta(df: pd.DataFrame) -> None:
     st.subheader("Análisis por Megacuenta")
 
     if "Megacuenta" not in df.columns:
-        st.info("El dataset no tiene columna 'Megacuenta'.")
+        st.caption("Sin columna 'Megacuenta' — esta vista no está disponible.")
         return
 
     # Selectbox en lugar de text input

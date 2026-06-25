@@ -318,8 +318,9 @@ def _leer_subido(uploaded_file, expected_cols: set, numeric_cols: set, label: st
         )
         miss = missing_columns(df, expected_cols)
         if miss:
-            st.warning(f"{label} (subido): faltan columnas {sorted(miss)}")
-        st.success(f"{label} subido: {len(df):,} filas")
+            st.warning(f"{label}: {len(df):,} filas — sin columnas: {sorted(miss)}")
+        else:
+            st.success(f"{label}: {len(df):,} filas")
         return df
     except Exception:
         logger.exception("Error leyendo el archivo subido de %s", label)
@@ -412,7 +413,6 @@ def load_consumo_and_valores(
             )
         elif hay_sub:
             fuente = SRC_SUBIDOS
-            st.info("No hay base cargada: se simulará con los archivos subidos.")
         else:
             fuente = SRC_BASE
             st.session_state.pop("data_source_radio", None)
