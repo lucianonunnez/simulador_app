@@ -1,7 +1,7 @@
 """
 Simulador de Costo Médico
 Entry point de la aplicación Streamlit.
-v0.6.0 — diseño Swiss Medical
+v0.6.1 — diseño Swiss Medical
 """
 
 import html
