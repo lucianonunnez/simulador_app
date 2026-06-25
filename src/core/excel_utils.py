@@ -219,6 +219,12 @@ def normalize_mstr_columns(df: pd.DataFrame) -> pd.DataFrame:
         df = df.rename(columns=rename)
         sobrantes = [c for c in df.columns if str(c).startswith("Unnamed")]
         df = df.drop(columns=sobrantes)
+
+    # Periodo Liquidacion (columna nueva del export con el mes incorporado)
+    # ya viene en MM-YYYY → mapear a Mes directamente.
+    if "Periodo Liquidacion" in df.columns and "Mes" not in df.columns:
+        df = df.rename(columns={"Periodo Liquidacion": "Mes"})
+
     return df
 
 
