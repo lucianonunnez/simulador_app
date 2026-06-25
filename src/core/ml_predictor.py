@@ -164,6 +164,9 @@ def construir_panel(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
             .reset_index(name="valor")
         )
 
+    if len(agg) == 0:
+        return pd.DataFrame(columns=["Prestador ID", "Prestacion ID", "mes_dt", "valor", "fue_activo"])
+
     # Rellenar calendario completo
     meses_todos = pd.date_range(start=agg["mes_dt"].min(), end=agg["mes_dt"].max(), freq="MS")
     entidades = agg[["Prestador ID", "Prestacion ID"]].drop_duplicates()
@@ -214,7 +217,7 @@ def enriquecer_con_categoricas(df_features: pd.DataFrame, df_consumo: pd.DataFra
     return df_features.merge(modas, on=["Prestador ID", "Prestacion ID"], how="left")
 
 
-@st.cache_data(show_spinner=False, max_entries=20,
+@st.cache_data(show_spinner=False, max_entries=6,
                hash_funcs={pd.DataFrame: df_fingerprint})
 def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     """
@@ -232,7 +235,7 @@ def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
 # ============================================================================
 # PREDICCIÓN
 # ============================================================================
-@st.cache_data(show_spinner=False, max_entries=20,
+@st.cache_data(show_spinner=False, max_entries=6,
                hash_funcs={pd.DataFrame: df_fingerprint})
 def predecir_lightgbm(
     df_consumo: pd.DataFrame,
@@ -295,7 +298,7 @@ def predecir_lightgbm(
     return out.reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False, max_entries=20,
+@st.cache_data(show_spinner=False, max_entries=6,
                hash_funcs={pd.DataFrame: df_fingerprint})
 def predecir_pablo(
     df_consumo: pd.DataFrame,

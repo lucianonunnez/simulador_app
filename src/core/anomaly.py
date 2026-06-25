@@ -264,6 +264,8 @@ def detect_structural_anomalies(
         # Media y std del grupo de pares (cross-section, no temporal)
         result["media_grupo"] = result.groupby(peer_group_cols)["__metric__"].transform("mean")
         result["std_grupo"] = result.groupby(peer_group_cols)["__metric__"].transform("std")
+        # std == 0 (grupos de un solo elemento) → NaN para evitar división por cero
+        result["std_grupo"] = result["std_grupo"].replace(0, np.nan)
 
         result["z_score_cross"] = (
             (result["__metric__"] - result["media_grupo"]) / result["std_grupo"]

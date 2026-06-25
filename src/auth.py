@@ -27,9 +27,24 @@ logger = logging.getLogger(__name__)
 
 
 def _clave_ratelimit() -> str:
-    """Clave para el lockout: el último username intentado si se conoce
-    (queda en session_state tras el primer intento), o un bucket global."""
-    return st.session_state.get("username") or "global"
+    """Clave para el lockout: username normalizado o bucket global."""
+    raw = st.session_state.get("username") or "global"
+    return raw.strip().lower()[:64]
+
+
+def _validate_session_username() -> None:
+    """Cross-check: verifica que el username autenticado exista en secrets.toml.
+    Bloquea cualquier intento de escalar privilegios via session_state manipulation."""
+    username = st.session_state.get("username", "")
+    try:
+        valid = st.secrets.get("credentials", {}).get("usernames", {})
+    except Exception:
+        valid = {}
+    if not username or username not in valid:
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.error("Sesión inválida. Por favor, volvé a ingresar.")
+        st.stop()
 
 
 def _build_authenticator() -> stauth.Authenticate:
@@ -124,7 +139,10 @@ def require_login() -> None:
     elif status is None:
         st.info("Ingresá tus credenciales para continuar")
         st.stop()
-    # Si status es True, sigue la ejecución normal
+
+    # Verificación cruzada: el username en session_state debe existir en secrets.toml.
+    # Esto cierra el vector de session_state manipulation incluso si authentication_status=True.
+    _validate_session_username()
 
 
 def _audit_login(status) -> None:

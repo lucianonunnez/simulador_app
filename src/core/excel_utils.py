@@ -16,6 +16,7 @@ Acá viven:
 from __future__ import annotations
 
 import re
+import zipfile
 from io import BytesIO, StringIO
 
 import pandas as pd
@@ -234,6 +235,15 @@ def load_excel_smart(file_content: bytes, expected_cols: set) -> pd.DataFrame:
     y normalizando las columnas crudas de MicroStrategy al contrato de la app.
     """
     if file_content[:2] == b"PK":  # firma ZIP -> xlsx
+        # Verificar que el ZIP contiene una estructura de xlsx real (xl/workbook.xml)
+        # antes de pasarlo a openpyxl — evita que cualquier ZIP válido sea aceptado.
+        try:
+            with zipfile.ZipFile(BytesIO(file_content)) as zf:
+                names = zf.namelist()
+        except zipfile.BadZipFile as exc:
+            raise ValueError("El archivo no es un xlsx válido.") from exc
+        if not any(n.startswith("xl/") for n in names):
+            raise ValueError("El archivo ZIP no contiene una estructura xlsx válida.")
         skiprows = detect_header_row(file_content, expected_cols)
         df = pd.read_excel(BytesIO(file_content), skiprows=skiprows, engine="openpyxl")
     else:  # CSV

@@ -368,7 +368,8 @@ def load_consumo_and_valores(
     base_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes)
     base_ok = base_consumo is not None and base_valores is not None
 
-    _is_admin = st.session_state.get("_user_role", "viewer") == "admin"
+    from auth import get_current_role
+    _is_admin = get_current_role() == "admin"
 
     with st.sidebar.expander("Datos", expanded=not base_ok):
         if base_consumo is not None:

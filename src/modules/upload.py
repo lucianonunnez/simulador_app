@@ -10,6 +10,7 @@ import pandas as pd
 import psycopg2.extras
 import streamlit as st
 
+from auth import get_current_role
 from core.db import get_connection
 from core.excel_utils import (
     CONSUMO_NUMERIC_COLS,
@@ -56,8 +57,9 @@ def _insertar(df: pd.DataFrame, mode: str) -> tuple:
 
     try:
         con = get_connection()
-    except Exception as exc:
-        return 0, f"No se pudo conectar a la base de datos: {exc}"
+    except Exception:
+        logger.exception("Error conectando a la base de datos para insertar consumo")
+        return 0, "No se pudo conectar a la base de datos. Contactá al administrador."
 
     try:
         with con.cursor() as cur:
@@ -79,15 +81,23 @@ def _insertar(df: pd.DataFrame, mode: str) -> tuple:
             psycopg2.extras.execute_values(cur, sql_insert, rows, page_size=1000)
         con.commit()
         return len(rows), ""
-    except Exception as exc:
+    except Exception:
         con.rollback()
         logger.exception("Error insertando consumo")
-        return 0, str(exc)
+        return 0, "Error interno al cargar los datos. Contactá al administrador."
     finally:
-        con.close()
+        try:
+            con.close()
+        except Exception:
+            pass
 
 
 def render() -> None:
+    if get_current_role() != "admin":
+        st.error("Acceso denegado.")
+        st.stop()
+        return
+
     st.title("Carga de Datos")
     st.caption(
         "Subí el export de MicroStrategy para actualizar la base de consumo. "

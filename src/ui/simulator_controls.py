@@ -12,6 +12,7 @@ Controles del simulador — renderizados inline en el cuerpo principal.
 
 from __future__ import annotations
 
+import html
 import pandas as pd
 import streamlit as st
 
@@ -289,7 +290,7 @@ def render_simulator_controls(
                     with cols[i % len(cols)]:
                         st.markdown(
                             f"<div style='font-size:12px; color:#212529; font-weight:500; "
-                            f"margin-bottom:2px;'>{nom[:28]}</div>",
+                            f"margin-bottom:2px;'>{html.escape(nom[:28])}</div>",
                             unsafe_allow_html=True,
                         )
                         pct = st.number_input(
