@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.ml_predictor import (
+    TF_AVAILABLE,
     get_feature_importance,
     load_metricas,
     predecir_lightgbm,
@@ -92,6 +93,14 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
         horizontal=True,
         format_func=lambda x: MODEL_LABEL.get(x, x),
     )
+
+    if modelo_principal == "pablo_corregido" and not TF_AVAILABLE:
+        st.info(
+            "La **Red Neuronal** no está disponible en este entorno "
+            "(TensorFlow no soporta Python 3.14 todavía). "
+            "Seleccioná **LightGBM** para ver predicciones."
+        )
+        return
 
     with st.spinner(f"Generando predicciones con {modelo_principal}..."):
         if modelo_principal == "lightgbm":
@@ -210,6 +219,20 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
 
     # Predicciones lado a lado
     st.write("### Predicciones aplicadas sobre tus datos")
+
+    if not TF_AVAILABLE:
+        st.info(
+            "La **Red Neuronal** no está disponible en este entorno. "
+            "Mostrando solo LightGBM."
+        )
+        with st.spinner("Generando predicciones LightGBM..."):
+            pred_lgb = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])
+        if len(pred_lgb) == 0:
+            st.warning("No hay suficientes datos para generar predicciones.")
+            return
+        ts_lgb = pred_lgb.groupby("mes_dt").agg(real=("valor_real", "sum"), pred=("prediccion", "sum")).reset_index()
+        st.line_chart(ts_lgb.set_index("mes_dt")[["real", "pred"]])
+        return
 
     with st.spinner("Generando predicciones de ambos modelos..."):
         pred_lgb = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])

@@ -24,9 +24,13 @@ import streamlit as st
 
 from core.cachekeys import df_fingerprint
 
-# Imports lazy para que la app no falle si TF no está instalado
-_tf = None
-_lgb = None
+# TF es opcional: no hay wheels para Python 3.14 en Streamlit Cloud.
+# La Red Neuronal queda deshabilitada en ese entorno; LightGBM sigue funcionando.
+try:
+    import tensorflow  # noqa: F401
+    TF_AVAILABLE = True
+except ImportError:
+    TF_AVAILABLE = False
 
 
 # ============================================================================
@@ -74,6 +78,11 @@ def load_lightgbm(metric: Literal["importe", "precio", "cantidad"]):
 @st.cache_resource(show_spinner="Cargando red neuronal...")
 def load_pablo(metric: Literal["importe", "precio", "cantidad"]):
     """Carga modelo Pablo corregido + sus scalers."""
+    if not TF_AVAILABLE:
+        raise RuntimeError(
+            "TensorFlow no está instalado en este entorno. "
+            "La Red Neuronal no está disponible (LightGBM sí funciona)."
+        )
     from tensorflow.keras.models import load_model
 
     path_model = MODELS_DIR / f"pablo_corregido_{metric}.keras"
