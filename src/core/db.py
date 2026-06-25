@@ -82,5 +82,5 @@ def table_count(con: psycopg2.extensions.connection, name: str) -> int:
     if not table_exists(con, name):
         return 0
     with con.cursor() as cur:
-        cur.execute(f'SELECT COUNT(*) FROM "{name}"')
+        cur.execute(f'SELECT COUNT(*) FROM simulador."{name}"')
         return cur.fetchone()[0]

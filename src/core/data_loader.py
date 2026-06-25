@@ -70,7 +70,7 @@ def _query_table(
         if not table_exists(con, table):
             return None
 
-        sql = f'SELECT * FROM "{table}"'
+        sql = f'SELECT * FROM simulador."{table}"'
         clauses: list[str] = []
         params: list = []
 
@@ -114,7 +114,7 @@ def _catalogo_prestadores() -> Optional[list]:
         with con.cursor() as cur:
             cur.execute(
                 f'SELECT DISTINCT "Prestador ID", "Prestador Desc" '
-                f'FROM "{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
+                f'FROM simulador."{CONSUMO_TABLE}" WHERE "Prestador ID" IS NOT NULL '
                 f'ORDER BY "Prestador Desc"'
             )
             rows = cur.fetchall()
@@ -156,7 +156,7 @@ def _resumen_base_cached() -> Optional[dict]:
         with con.cursor() as cur:
             cur.execute(
                 f'SELECT COUNT(*), COUNT(DISTINCT "Prestador ID"), '
-                f'COUNT(DISTINCT "Mes") FROM "{CONSUMO_TABLE}"'
+                f'COUNT(DISTINCT "Mes") FROM simulador."{CONSUMO_TABLE}"'
             )
             fila = cur.fetchone()
         if fila is None:
@@ -165,7 +165,7 @@ def _resumen_base_cached() -> Optional[dict]:
         tarifas = 0
         if table_exists(con, VALORES_TABLE):
             with con.cursor() as cur:
-                cur.execute(f'SELECT COUNT(*) FROM "{VALORES_TABLE}"')
+                cur.execute(f'SELECT COUNT(*) FROM simulador."{VALORES_TABLE}"')
                 t = cur.fetchone()
                 tarifas = int(t[0]) if t else 0
         return {
