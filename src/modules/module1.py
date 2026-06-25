@@ -335,11 +335,20 @@ def _render_negociacion(
 
 
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
+    from auth import get_current_role
+
     st.info(
-        "**Esperando datos** — Abrí la sección **«Carga de datos»** del menú "
-        "izquierdo y subí los archivos (o corré `python scripts/ingest.py`)."
+        "**Esperando datos** — "
+        + (
+            "Abrí la sección **«Carga de datos»** del menú izquierdo y subí los archivos."
+            if get_current_role() == "admin"
+            else "Los datos aún no fueron cargados. Aguardá a que el administrador cargue los archivos."
+        )
     )
     st.markdown(f"""
     - {"✔ cargado" if consumo_loaded else "✘ pendiente"} — **Consumo** (xlsx/csv)
     - {"✔ cargado" if valores_loaded else "✘ pendiente"} — **Valores** (xlsx/csv)
     """)
+    if st.button("Recargar datos", key="reload_waiting_m1"):
+        st.cache_data.clear()
+        st.rerun()

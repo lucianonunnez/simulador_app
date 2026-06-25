@@ -64,6 +64,11 @@ def _query_table(
         con = get_connection()
     except Exception:
         logger.warning("No se pudo conectar a Supabase para '%s'", table)
+        st.warning(
+            "No se pudo conectar a la base de datos. "
+            "Verificá la configuración de secrets o contactá al administrador.",
+            icon="⚠️",
+        )
         return None
 
     try:

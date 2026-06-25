@@ -56,7 +56,9 @@ def get_connection() -> psycopg2.extensions.connection:
     'simulador' tanto en local como deployado contra el Session Pooler.
     """
     url = _get_db_url()
-    con = psycopg2.connect(url, options=f"-c search_path={SCHEMA},public")
+    # Sin `options`: el Transaction Pooler (PgBouncer puerto 6543) puede
+    # rechazar parámetros de startup. Todas las queries usan simulador."tabla".
+    con = psycopg2.connect(url)
     try:
         with con.cursor() as cur:
             cur.execute(f"SET search_path TO {SCHEMA}, public")

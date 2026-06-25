@@ -45,10 +45,19 @@ def render() -> None:
     # --- Datos ---
     df_consumo, _ = load_consumo_and_valores()
     if df_consumo is None:
+        from auth import get_current_role
+
         st.info(
-            "**Esperando datos** — Abrí la sección **«Carga de datos»** del menú "
-            "izquierdo y subí el archivo de Consumo (o corré `python scripts/ingest.py`)."
+            "**Esperando datos** — "
+            + (
+                "Abrí la sección **«Carga de datos»** del menú izquierdo y subí el archivo de Consumo."
+                if get_current_role() == "admin"
+                else "Los datos aún no fueron cargados. Aguardá a que el administrador cargue los archivos."
+            )
         )
+        if st.button("Recargar datos", key="reload_waiting_m3"):
+            st.cache_data.clear()
+            st.rerun()
         return
 
     st.caption(f"Dataset cargado: **{format_int(len(df_consumo))}** registros")
