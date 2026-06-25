@@ -35,7 +35,7 @@ dist/
 venv/
 env/
 ENV/
-.python-version
+# .python-version — tracked for Streamlit Cloud uv Python version selection
 
 # ============================================================================
 # Testing / tooling
