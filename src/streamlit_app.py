@@ -19,7 +19,7 @@ logging.getLogger("tensorflow").setLevel(logging.ERROR)
 import streamlit as st
 
 from auth import require_login, render_logout, get_current_user
-from modules import module1, module2, module3
+from modules import module1, module2, module3, upload
 from ui.formatters import format_int
 from ui.styles import brand_header_sidebar, inject_css
 
@@ -50,16 +50,32 @@ inject_css()
 require_login()
 
 # ============================================================================
-# NAVEGACIÓN
+# NAVEGACIÓN — filtrada por rol
 # ============================================================================
-MODULOS = [
+_MODULOS_ADMIN = [
+    "Inicio",
+    "Carga de Datos",
+    "Módulo 1 — Simulador",
+    "Módulo 2 — Desvíos",
+    "Módulo 3 — Predicción ML",
+]
+_MODULOS_MANAGER = [
     "Inicio",
     "Módulo 1 — Simulador",
     "Módulo 2 — Desvíos",
     "Módulo 3 — Predicción ML",
 ]
+_MODULOS_VIEWER = [
+    "Inicio",
+    "Módulo 1 — Simulador",
+]
 
 user = get_current_user()
+MODULOS = {
+    "admin": _MODULOS_ADMIN,
+    "manager": _MODULOS_MANAGER,
+    "viewer": _MODULOS_VIEWER,
+}.get(user["role"], _MODULOS_VIEWER)
 # Los datos de usuario se interpolan en HTML (unsafe_allow_html): escapar
 # siempre, aunque hoy vengan de secrets.toml controlado por el admin.
 _nombre = html.escape(user["name"])
@@ -167,6 +183,8 @@ def _render_inicio() -> None:
 # ============================================================================
 if modulo == "Inicio":
     _render_inicio()
+elif modulo == "Carga de Datos":
+    upload.render()
 elif modulo == "Módulo 1 — Simulador":
     module1.render()
 elif modulo == "Módulo 2 — Desvíos":

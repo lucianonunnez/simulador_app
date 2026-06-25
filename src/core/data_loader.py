@@ -367,22 +367,25 @@ def load_consumo_and_valores(
     base_valores = _query_table(VALORES_TABLE, VALORES_MES_COL, pid, mes)
     base_ok = base_consumo is not None and base_valores is not None
 
-    with st.sidebar.expander("Carga de datos", expanded=not base_ok):
+    _is_admin = st.session_state.get("_user_role", "viewer") == "admin"
+
+    with st.sidebar.expander("Datos", expanded=not base_ok):
         if base_consumo is not None:
-            st.success(f"Base · Consumo: {len(base_consumo):,} filas")
+            st.success(f"Consumo: {len(base_consumo):,} filas")
         if base_valores is not None:
-            st.success(f"Base · Valores: {len(base_valores):,} filas")
+            st.success(f"Valores: {len(base_valores):,} filas")
 
         if st.button(
             "Recargar datos",
             key="reload_data",
             help="Vacía el caché y vuelve a leer la base "
-                 "(útil tras correr la ingesta).",
+                 "(útil tras cargar datos nuevos).",
         ):
             st.cache_data.clear()
             st.rerun()
 
-        _render_ingesta_pendiente()
+        if _is_admin:
+            _render_ingesta_pendiente()
 
         st.divider()
         st.markdown("**Subir archivos** _(opcional)_")

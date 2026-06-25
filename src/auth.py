@@ -140,6 +140,8 @@ def _audit_login(status) -> None:
         if not st.session_state.get("_audit_login_logged"):
             log_event("login_success", username=username, success=True)
             st.session_state["_audit_login_logged"] = True
+            # Cachear el rol para que data_loader y otros lo lean rápido
+            st.session_state["_user_role"] = get_current_role()
         ratelimit.reset(username or "global")
     elif status is False and prev is not False:
         log_event("login_failed", username=username, success=False)
@@ -148,24 +150,43 @@ def _audit_login(status) -> None:
     st.session_state["_audit_last_status"] = status
 
 
+def get_current_role() -> str:
+    """
+    Devuelve el rol del usuario logueado: 'admin', 'manager' o 'viewer'.
+
+    Lee el campo `role` de secrets.toml para el usuario actual.
+    Si el campo no existe, devuelve 'viewer' (el más restrictivo).
+
+    Roles válidos:
+      admin   — puede cargar datos + todos los módulos
+      manager — todos los módulos, sin carga de datos
+      viewer  — solo Módulo 1
+    """
+    username = st.session_state.get("username", "")
+    if not username:
+        return "viewer"
+    try:
+        user_conf = st.secrets["credentials"]["usernames"].get(username, {})
+        return user_conf.get("role", "viewer")
+    except Exception:
+        return "viewer"
+
+
 def get_current_user() -> dict:
     """
     Devuelve un dict con la info del usuario logueado.
 
     Returns:
         {
-            "username": str,   # el "luciano"
-            "name": str,       # el "Luciano Núñez"
+            "username": str,   # "luciano"
+            "name": str,       # "Luciano Núñez"
+            "role": str,       # "admin" | "manager" | "viewer"
         }
-
-    Nota: el campo "role" se eliminó a propósito. Ningún módulo autorizaba
-    nada con él, así que daba una falsa sensación de control de acceso
-    (hallazgo de la auditoría de seguridad). Si en el futuro hay acciones
-    que requieran privilegios, reintroducirlo junto con el gate real.
     """
     return {
         "username": st.session_state.get("username", ""),
         "name": st.session_state.get("name", ""),
+        "role": get_current_role(),
     }
 
 
