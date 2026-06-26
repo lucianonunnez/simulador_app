@@ -194,8 +194,13 @@ def render_simulator_controls(
             labels = (
                 prest_df["Prestador ID"].astype(str) + " - " + prest_df["Prestador Desc"]
             ).tolist()
-        options  = ["TODOS"] + labels
+        # El primer prestador es el default (NO "TODOS"): cargar todos los
+        # prestadores a la vez puede agotar la memoria del server (OOM). "TODOS"
+        # queda como opción explícita al final, para la vista comparativa.
+        options  = labels + ["TODOS"] if labels else ["TODOS"]
         selected = st.selectbox("Prestador", options, key="sim_prest")
+        if selected == "TODOS":
+            st.caption("⚠️ Trae TODOS los prestadores a memoria — puede ser lento.")
 
     config["prestador_id"] = None if selected == "TODOS" else int(selected.split(" - ")[0])
     # Flujo único en capas (sin "modo" excluyente): general + ajustes opcionales.

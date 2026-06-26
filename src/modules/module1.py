@@ -178,6 +178,12 @@ def render() -> None:
     else:
         catalogo = get_prestadores_disponibles()
         pid_previo = _prestador_seleccionado() if catalogo else None
+        # Primera entrada (todavía sin selección): cargar SOLO el primer
+        # prestador del catálogo, no las ~420k filas de TODOS. Traer el universo
+        # completo a memoria hacía que Streamlit Cloud matara el proceso (OOM).
+        # "TODOS" sigue disponible como elección EXPLÍCITA en el selector.
+        if pid_previo is None and catalogo and "sim_prest" not in st.session_state:
+            pid_previo = int(catalogo[0][0])
         if pid_previo is not None:
             df_consumo, df_valores = load_consumo_and_valores(prestador_ids=[pid_previo])
         else:
