@@ -136,16 +136,27 @@ def _render_metrics(total_ideal: float, total_sim: float, dif: float, pct: float
 # RENDER PRINCIPAL
 # ============================================================================
 
-def _prestador_seleccionado() -> int | None:
-    """ID del prestador elegido en el selector (estado persistente del widget),
-    o None si es 'TODOS' / aún no se eligió."""
-    label = st.session_state.get("sim_prest")
-    if not label or label == "TODOS":
-        return None
-    try:
-        return int(str(label).split(" - ")[0])
-    except (ValueError, IndexError):
-        return None
+_PLACEHOLDER_PREST = "— Elegí un prestador —"
+
+
+def _render_selector_prestador(labels: list[str]) -> tuple[str, int | None]:
+    """Selectbox de prestador, arriba de todo y ANTES de cargar datos.
+
+    Arranca SIN selección (placeholder): así no se procesa nada hasta que se
+    elige un prestador. Devuelve (estado, pid) con estado ∈ {'vacio','todos',
+    'uno'} y pid int solo cuando estado == 'uno'.
+    """
+    col, _ = st.columns([1, 1])
+    with col:
+        opciones = [_PLACEHOLDER_PREST] + labels + ["TODOS"]
+        selected = st.selectbox("Prestador", opciones, key="sim_prest")
+        if selected == "TODOS":
+            st.caption("⚠️ Trae TODOS los prestadores a memoria — puede ser lento.")
+    if not selected or selected == _PLACEHOLDER_PREST:
+        return "vacio", None
+    if selected == "TODOS":
+        return "todos", None
+    return "uno", int(selected.split(" - ")[0])
 
 
 def render() -> None:
@@ -167,48 +178,59 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
-    # Cuando la fuente usa archivos subidos (solo o combinados) se trae el
-    # universo completo y el selector de prestadores se arma desde los datos
-    # (catalogo=None) — así aparecen también los prestadores subidos. Si la
-    # fuente es la base, se mantiene el push-down: se carga SOLO el prestador
-    # elegido (filtro en SQL) y el selector usa el catálogo liviano de DuckDB.
-    if source_uses_uploads():
+    # ── Selector de prestador PRIMERO; recién al elegir, se procesa ──
+    # No traemos NADA a memoria hasta que se elige un prestador: cargar las
+    # ~420k filas de TODOS hacía que Streamlit Cloud matara el proceso (OOM).
+    # El selector se arma del catálogo liviano (sin cargar datos); al elegir se
+    # carga SOLO ese prestador (push-down a SQL). "TODOS" es opt-in y pesado.
+    uploads = source_uses_uploads()
+
+    if uploads:
+        # Modo upload: los datos del usuario ya están acotados y en memoria; el
+        # selector lo arma render_simulator_controls (comportamiento histórico).
         catalogo = None
         df_consumo, df_valores = load_consumo_and_valores()
+        if df_consumo is None or df_valores is None:
+            cargando.empty()
+            _render_waiting_state(df_consumo is not None, df_valores is not None)
+            return
+        cargando.empty()
     else:
         catalogo = get_prestadores_disponibles()
-        pid_previo = _prestador_seleccionado() if catalogo else None
-        # Primera entrada (todavía sin selección): cargar SOLO el primer
-        # prestador del catálogo, no las ~420k filas de TODOS. Traer el universo
-        # completo a memoria hacía que Streamlit Cloud matara el proceso (OOM).
-        # "TODOS" sigue disponible como elección EXPLÍCITA en el selector.
-        if pid_previo is None and catalogo and "sim_prest" not in st.session_state:
-            pid_previo = int(catalogo[0][0])
-        if pid_previo is not None:
-            df_consumo, df_valores = load_consumo_and_valores(prestador_ids=[pid_previo])
-        else:
-            df_consumo, df_valores = load_consumo_and_valores()
-
-    if df_consumo is None or df_valores is None:
+        if not catalogo:
+            cargando.empty()
+            _render_waiting_state(False, False)
+            return
         cargando.empty()
-        _render_waiting_state(df_consumo is not None, df_valores is not None)
-        return
+        labels = [f"{int(pid)} - {desc}" for pid, desc in catalogo]
+        estado, prestador_id = _render_selector_prestador(labels)
+        if estado == "vacio":
+            st.info("Elegí un prestador en el selector de arriba para empezar el análisis.")
+            return
+        with st.spinner("Cargando datos del prestador…"):
+            if estado == "todos":
+                df_consumo, df_valores = load_consumo_and_valores()
+            else:
+                df_consumo, df_valores = load_consumo_and_valores(prestador_ids=[prestador_id])
+        if df_consumo is None or df_valores is None:
+            _render_waiting_state(df_consumo is not None, df_valores is not None)
+            return
 
-    # Normalización + merge cacheados: solo se recalculan si cambian los datos,
-    # así no reaparece el indicador de progreso en cada interacción.
+    # Normalización + merge cacheados: solo se recalculan si cambian los datos.
     df_merged = get_merged_dataset(df_consumo, df_valores)
     if df_merged is None or len(df_merged) == 0:
-        cargando.empty()
         st.error(
             "No se encontraron coincidencias entre Consumo y Valores. "
             "Revisá que las claves (Prestador / Convenio / Prestación) coincidan."
         )
         return
 
-    cargando.empty()
     st.caption(f"Datos listos · **{format_int(len(df_merged))}** registros")
 
-    config = render_simulator_controls(df_merged, prestadores=catalogo)
+    if uploads:
+        config = render_simulator_controls(df_merged)
+    else:
+        config = render_simulator_controls(df_merged, prestador_id=prestador_id)
 
     if config["prestador_id"] is None:
         df_scope = df_merged.copy()

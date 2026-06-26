@@ -165,44 +165,51 @@ def _render_ajustes_prestacion(df_scope: pd.DataFrame, config: dict, base: float
         st.dataframe(pd.DataFrame(preview), use_container_width=True, hide_index=True)
 
 
+_SIN_SELECTOR_EXTERNO = object()
+
+
 def render_simulator_controls(
-    df_merged: pd.DataFrame, prestadores: list | None = None
+    df_merged: pd.DataFrame,
+    prestador_id: object = _SIN_SELECTOR_EXTERNO,
+    prestadores: list | None = None,
 ) -> dict:
     """
     Controles del simulador.
 
     Args:
-        df_merged: datos (posiblemente ya filtrados por prestador).
-        prestadores: catálogo completo [(id, desc), ...] para el selector.
-            Cuando los datos vienen filtrados por prestador (push-down a
-            DuckDB), las opciones deben salir del catálogo y no de df_merged
-            (que solo contiene el prestador elegido). None = derivar de
-            df_merged (modo upload, comportamiento histórico).
+        df_merged: datos (ya filtrados por el prestador elegido).
+        prestador_id: prestador ya elegido afuera (None = "TODOS"). En el modo
+            base, el selector se renderiza ANTES de cargar datos —para no traer
+            todo a memoria (OOM)— y el elegido llega por acá. Si NO se pasa
+            (modo upload), el selector se renderiza acá, como siempre.
+        prestadores: catálogo [(id, desc), ...] para el selector del modo upload.
     """
     config = {}
 
     # ── Fila 1: Prestador ──
-    col_prest, _ = st.columns([1, 1])
-    with col_prest:
-        if prestadores:
-            labels = [f"{int(pid)} - {desc}" for pid, desc in prestadores]
-        else:
-            prest_df = (
-                df_merged[["Prestador ID", "Prestador Desc"]]
-                .drop_duplicates().sort_values("Prestador Desc")
-            )
-            labels = (
-                prest_df["Prestador ID"].astype(str) + " - " + prest_df["Prestador Desc"]
-            ).tolist()
-        # El primer prestador es el default (NO "TODOS"): cargar todos los
-        # prestadores a la vez puede agotar la memoria del server (OOM). "TODOS"
-        # queda como opción explícita al final, para la vista comparativa.
-        options  = labels + ["TODOS"] if labels else ["TODOS"]
-        selected = st.selectbox("Prestador", options, key="sim_prest")
-        if selected == "TODOS":
-            st.caption("⚠️ Trae TODOS los prestadores a memoria — puede ser lento.")
+    if prestador_id is _SIN_SELECTOR_EXTERNO:
+        # Modo upload: los datos ya están en memoria; el selector va acá.
+        col_prest, _ = st.columns([1, 1])
+        with col_prest:
+            if prestadores:
+                labels = [f"{int(pid)} - {desc}" for pid, desc in prestadores]
+            else:
+                prest_df = (
+                    df_merged[["Prestador ID", "Prestador Desc"]]
+                    .drop_duplicates().sort_values("Prestador Desc")
+                )
+                labels = (
+                    prest_df["Prestador ID"].astype(str) + " - " + prest_df["Prestador Desc"]
+                ).tolist()
+            options  = labels + ["TODOS"] if labels else ["TODOS"]
+            selected = st.selectbox("Prestador", options, key="sim_prest")
+            if selected == "TODOS":
+                st.caption("⚠️ Trae TODOS los prestadores a memoria — puede ser lento.")
+        config["prestador_id"] = None if selected == "TODOS" else int(selected.split(" - ")[0])
+    else:
+        # Modo base: el selector ya se renderizó afuera (gating de carga).
+        config["prestador_id"] = prestador_id
 
-    config["prestador_id"] = None if selected == "TODOS" else int(selected.split(" - ")[0])
     # Flujo único en capas (sin "modo" excluyente): general + ajustes opcionales.
     config["mode"] = "capas"
 
