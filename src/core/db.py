@@ -48,10 +48,16 @@ VALORES_KEY = ("Prestador ID", "Mes Vigencia")
 # pisar con la env var SUPABASE_REGION o el secret supabase_region si migrara.
 _DEFAULT_REGION = "sa-east-1"
 
+# Supabase tiene dos "shards" de pooler por región: aws-0 (proyectos viejos) y
+# aws-1 (proyectos nuevos). Una URL directa NO dice cuál le toca, así que al
+# reescribir probamos ambos en orden (aws-1 primero: los proyectos recientes
+# viven ahí). Si el usuario pega la URL del pooler ya armada, se respeta tal cual.
+_POOLER_IDS = ("aws-1", "aws-0")
+
 # Parámetros de robustez de la conexión.
-_CONNECT_TIMEOUT = 15          # segundos para abrir la conexión (no colgar)
-_MAX_ATTEMPTS = 3              # intentos ante errores transitorios
-_RETRY_BACKOFF = (1, 3, 6)     # segundos de espera entre intentos
+_CONNECT_TIMEOUT = 10          # segundos para abrir la conexión (no colgar)
+_MAX_ATTEMPTS = 3              # rondas de reintento ante errores transitorios
+_RETRY_BACKOFF = (1, 3, 6)     # segundos de espera entre rondas
 
 # keepalives TCP: si el Session Pooler deja la conexión ociosa, estos pings
 # evitan que el SO la dé por muerta y se corte a mitad de una operación.
@@ -88,17 +94,26 @@ def _region() -> str:
     return region or _DEFAULT_REGION
 
 
-def _normalize_db_url(url: str) -> str:
-    """Devuelve una URL apta para conectar desde un entorno solo-IPv4.
+def _with_sslmode(parts) -> str:
+    """Garantiza sslmode=require en el query string y serializa la URL."""
+    query = parts.query
+    if "sslmode=" not in query:
+        query = (query + "&" if query else "") + "sslmode=require"
+        parts = parts._replace(query=query)
+    return urlunsplit(parts)
 
-    - Si apunta a la conexión DIRECTA (`db.<ref>.supabase.co`, solo IPv6), la
-      reescribe al **Session Pooler** (IPv4): host `aws-0-<region>.pooler...`,
-      usuario `postgres` -> `postgres.<ref>`, puerto 5432.
-    - Garantiza `sslmode=require`.
+
+def _candidate_db_urls(url: str) -> list[str]:
+    """URLs candidatas a probar, en orden, desde un entorno solo-IPv4.
+
+    - Si la URL apunta a la conexión DIRECTA (`db.<ref>.supabase.co`, solo
+      IPv6), la reescribe al **Session Pooler** (IPv4) y devuelve UNA candidata
+      por cada shard de pooler (aws-1, aws-0): no sabemos cuál le toca al
+      proyecto, así que se prueban ambas (usuario `postgres` -> `postgres.<ref>`).
+    - Si ya apunta al pooler (u otro host), la respeta tal cual (solo agrega
+      sslmode). Una sola candidata.
     - Si la contraseña es un placeholder (TU_PASSWORD, [YOUR-PASSWORD], ...),
       lanza un error claro (no tiene sentido intentar conectar).
-
-    No toca una URL que ya apunte al pooler: solo agrega sslmode si falta.
     """
     parts = urlsplit(url.strip())
     netloc = parts.netloc
@@ -128,32 +143,30 @@ def _normalize_db_url(url: str) -> str:
     else:
         host, _, port = hostport.partition(":")
 
-    # ¿Es la conexión directa db.<ref>.supabase.co (solo IPv6)?
-    if host.startswith("db.") and host.endswith(".supabase.co"):
-        ref = host[len("db."):-len(".supabase.co")]
-        new_host = f"aws-0-{_region()}.pooler.supabase.com"
-        # El pooler exige el usuario calificado con el ref del proyecto.
-        new_user = user if "." in user else f"{user or 'postgres'}.{ref}"
-        new_port = port or "5432"
+    # ¿NO es la conexión directa? -> respetar la URL tal cual (una candidata).
+    if not (host.startswith("db.") and host.endswith(".supabase.co")):
+        return [_with_sslmode(parts)]
+
+    # Conexión directa: reescribir al pooler, una candidata por shard.
+    ref = host[len("db."):-len(".supabase.co")]
+    # El pooler exige el usuario calificado con el ref del proyecto.
+    new_user = user if "." in user else f"{user or 'postgres'}.{ref}"
+    new_port = port or "5432"
+    logger.warning(
+        "supabase_db_url apuntaba a la conexión directa (solo IPv6); se "
+        "reescribe al Session Pooler (IPv4) probando shards %s.", _POOLER_IDS
+    )
+    candidates: list[str] = []
+    for pooler_id in _POOLER_IDS:
+        new_host = f"{pooler_id}-{_region()}.pooler.supabase.com"
         netloc = f"{new_user}:{password}@{new_host}:{new_port}" if password \
             else f"{new_user}@{new_host}:{new_port}"
-        logger.warning(
-            "supabase_db_url apuntaba a la conexión directa (solo IPv6); "
-            "reescrita al Session Pooler %s para conectar por IPv4.", new_host
-        )
-        parts = parts._replace(netloc=netloc)
-
-    # Garantizar sslmode=require en el query string.
-    query = parts.query
-    if "sslmode=" not in query:
-        query = (query + "&" if query else "") + "sslmode=require"
-        parts = parts._replace(query=query)
-
-    return urlunsplit(parts)
+        candidates.append(_with_sslmode(parts._replace(netloc=netloc)))
+    return candidates
 
 
-def _get_db_url() -> str:
-    """Devuelve la URL de conexión (normalizada) desde secrets o env var."""
+def _get_raw_db_url() -> str:
+    """Devuelve la URL cruda desde secrets (app) o env var (CLI)."""
     raw = None
     try:
         import streamlit as st
@@ -166,13 +179,14 @@ def _get_db_url() -> str:
             "Configurá supabase_db_url en .streamlit/secrets.toml "
             "o la variable de entorno DATABASE_URL."
         )
-    return _normalize_db_url(raw)
+    return raw
 
 
 def get_connection() -> psycopg2.extensions.connection:
     """Abre una conexión PostgreSQL robusta con search_path=simulador.
 
-    - Normaliza la URL (directa -> Session Pooler) para funcionar desde IPv4.
+    - Reescribe una URL directa (solo IPv6) al Session Pooler (IPv4) y prueba
+      ambos shards (aws-1/aws-0) hasta que uno conecte.
     - Usa connect_timeout + keepalives para que la conexión no se cuelgue ni
       se corte por inactividad del pooler.
     - Reintenta con backoff ante errores transitorios de red.
@@ -180,32 +194,34 @@ def get_connection() -> psycopg2.extensions.connection:
       no propagar el parámetro de arranque `options`), de modo que las queries
       sin schema-qualify ('FROM consumo') resuelvan a 'simulador'.
     """
-    url = _get_db_url()
+    candidates = _candidate_db_urls(_get_raw_db_url())
     last_err: Exception | None = None
-    for intento in range(_MAX_ATTEMPTS):
-        try:
-            con = psycopg2.connect(url, **_KEEPALIVE_KWARGS)
+    for ronda in range(_MAX_ATTEMPTS):
+        for url in candidates:
             try:
-                with con.cursor() as cur:
-                    cur.execute(f"SET search_path TO {SCHEMA}, public")
-                con.commit()
-            except Exception:
-                con.rollback()
-            return con
-        except psycopg2.OperationalError as err:
-            # Errores transitorios (red, pooler reciclando): reintentar.
-            last_err = err
-            if intento < _MAX_ATTEMPTS - 1:
-                espera = _RETRY_BACKOFF[min(intento, len(_RETRY_BACKOFF) - 1)]
+                con = psycopg2.connect(url, **_KEEPALIVE_KWARGS)
+                try:
+                    with con.cursor() as cur:
+                        cur.execute(f"SET search_path TO {SCHEMA}, public")
+                    con.commit()
+                except Exception:
+                    con.rollback()
+                return con
+            except psycopg2.OperationalError as err:
+                last_err = err
+                # Host del candidato para el log (sin exponer la contraseña).
+                host = urlsplit(url).hostname
                 logger.warning(
-                    "Fallo al conectar a Supabase (intento %d/%d): %s. "
-                    "Reintentando en %ds...",
-                    intento + 1, _MAX_ATTEMPTS, err, espera,
+                    "Fallo al conectar a Supabase via %s (ronda %d/%d): %s",
+                    host, ronda + 1, _MAX_ATTEMPTS, err,
                 )
-                time.sleep(espera)
-            else:
-                logger.error("No se pudo conectar a Supabase tras %d intentos: %s",
-                             _MAX_ATTEMPTS, err)
+        # Todos los candidatos fallaron en esta ronda: backoff y reintentar.
+        if ronda < _MAX_ATTEMPTS - 1:
+            espera = _RETRY_BACKOFF[min(ronda, len(_RETRY_BACKOFF) - 1)]
+            logger.warning("Reintentando la conexión a Supabase en %ds...", espera)
+            time.sleep(espera)
+    logger.error("No se pudo conectar a Supabase tras %d rondas: %s",
+                 _MAX_ATTEMPTS, last_err)
     raise last_err  # type: ignore[misc]
 
 
