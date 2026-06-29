@@ -25,6 +25,7 @@ from core.cachekeys import df_fingerprint
 
 logger = logging.getLogger(__name__)
 
+from core import db_remote
 from core.db import (
     CONSUMO_TABLE,
     DB_PATH,
@@ -61,7 +62,11 @@ def _db_fingerprint() -> str:
     reescribe la base, el fingerprint cambia y el caché se invalida solo.
     Antes, los datos recién ingeridos tardaban hasta 10 min (el TTL) en
     aparecer en la app.
+
+    Con Supabase configurado, la identidad viene de la base remota.
     """
+    if db_remote.remote_configured():
+        return db_remote.fingerprint()
     try:
         s = DB_PATH.stat()
         return f"{s.st_mtime_ns}-{s.st_size}"
@@ -94,7 +99,12 @@ def _query_table(
     Devuelve None si la base/tabla no existe o no hay filas (para que la capa
     de arriba muestre el fallback de upload manual). Cacheado 10 min, con
     invalidación automática al reingerir (db_state = fingerprint de la base).
+
+    Si hay Supabase configurado, la consulta va a la base remota (mismo
+    contrato de columnas y mismo push-down de filtros).
     """
+    if db_remote.remote_configured():
+        return db_remote.query_table(table, mes_col, prestador_ids, meses)
     if not DB_PATH.exists():
         return None
 
@@ -153,6 +163,8 @@ def _query_table(
 @st.cache_data(ttl=600, show_spinner=False)
 def _catalogo_prestadores(db_state: str) -> Optional[list]:
     """SELECT DISTINCT de prestadores (liviano) — para selectores."""
+    if db_remote.remote_configured():
+        return db_remote.catalogo_prestadores()
     if not DB_PATH.exists():
         return None
     con = _get_ro_connection().cursor()
@@ -184,6 +196,8 @@ def get_prestadores_disponibles() -> Optional[list]:
 @st.cache_data(ttl=600, show_spinner=False)
 def _resumen_base_cached(db_state: str) -> Optional[dict]:
     """Conteos livianos (COUNT/DISTINCT en SQL) para el panel de Inicio."""
+    if db_remote.remote_configured():
+        return db_remote.resumen()
     if not DB_PATH.exists():
         return None
     con = _get_ro_connection().cursor()

@@ -2,6 +2,9 @@ streamlit==1.38.0
 streamlit-authenticator==0.3.2
 bcrypt>=4.0.0
 duckdb>=1.0.0
+# Conector a Supabase/PostgreSQL (fuente de datos remota). Si no hay config de
+# Supabase en secrets, la app usa DuckDB local y este driver no se importa.
+psycopg2-binary>=2.9.9
 # pandas>=2.2 es requerido: el feature engineering usa
 # groupby(...).apply(..., include_groups=False), que solo existe desde 2.2.
 pandas>=2.2,<3
