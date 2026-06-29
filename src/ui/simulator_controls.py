@@ -234,9 +234,10 @@ def render_simulator_controls(
         st.markdown("**1. Aumento general**")
         general = st.number_input(
             "Aumento general (%)", min_value=-100.0, max_value=500.0,
-            value=15.0, step=0.5, key="sim_flat_pct",
+            value=0.0, step=0.5, key="sim_flat_pct",
             help="El % base que reciben TODAS las prestaciones. Después podés "
-                 "refinar por grupo o por prestación abajo (opcional).",
+                 "refinar por grupo o por prestación abajo (opcional). "
+                 "Arranca en 0% a propósito: cargá el aumento a evaluar.",
         )
         config["flat_pct"] = general
 

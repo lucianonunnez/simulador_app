@@ -221,6 +221,28 @@ def test_apply_simulation_reproduce_valor_ofrecido_fila_a_fila(nombre):
     assert m["impacto"] == pytest.approx(caso["impacto_anio"], rel=1e-6)
 
 
+@pytest.mark.parametrize("nombre", list(CASOS))
+def test_validar_workbook_reproduce_impacto_por_dos_rutas(nombre):
+    """El validador de UI (core.workbook_validacion) recalcula el Impacto del
+    workbook con el motor de la app y reconcilia el escenario Propuesto, con
+    desvío ~0 entre las dos rutas internas (reconstruido vs Q×P del negocio)."""
+    from core.workbook_validacion import validar_workbook
+
+    caso = CASOS[nombre]
+    ruta = _ruta(caso)
+    if ruta is None:
+        pytest.skip(f"fixture ausente: {caso['archivo']} (datos sensibles, no versionados)")
+
+    res = validar_workbook(ruta.read_bytes())
+    prop = res["propuesto"]
+    assert prop is not None
+    assert prop["impacto_pct"] == pytest.approx(caso["impacto_pct"], abs=1e-9)
+    assert prop["impacto"] == pytest.approx(caso["impacto_anio"], rel=1e-9)
+    # las dos rutas internas coinciden -> workbook consistente y app lo reproduce
+    assert prop["desvio_qxp"] is not None and prop["desvio_qxp"] < 1e-9
+    assert res["solicitado"]["desvio_qxp"] < 1e-9
+
+
 def test_capas_override_por_prestacion_pisa_el_plano_general():
     """Regresión SIN fixtures (siempre corre): el patrón de HI jun-26 — plano
     general + un puñado de prestaciones a 0% — se reproduce con 'capas'.

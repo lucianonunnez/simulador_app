@@ -15,7 +15,7 @@ from core.data_loader import (
     load_consumo_and_valores,
     source_uses_uploads,
 )
-from core.simulator import apply_simulation, impact_metrics
+from core.simulator import apply_simulation, impact_metrics, merge_coverage
 from ui.formatters import format_currency, format_currency_full, format_int
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
@@ -73,6 +73,47 @@ def _apply_simulation_cached(
 # ============================================================================
 # HELPERS DE UI
 # ============================================================================
+
+def _render_cobertura_y_tarifario(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> None:
+    """
+    Cobertura del merge (por FILAS y por IMPORTE) + vigencia del tarifario.
+
+    El inner join descarta en silencio el consumo sin tarifa: medir solo filas
+    enmascara cuánta plata queda FUERA de la simulación (hallazgo real: ~98% de
+    filas con tarifa pero ~73% del importe). Acá se hace visible. Además se
+    muestra a qué 'Mes Vigencia' corresponde el tarifario que se está usando,
+    para que no haya confusión cuando los $ no calzan con un workbook viejo.
+    """
+    cob = merge_coverage(df_consumo, df_merged)
+
+    # Vigencia del tarifario realmente usado en el merge (la más reciente).
+    vigencia = None
+    if "Mes Vigencia" in df_merged.columns:
+        from core.excel_utils import normalize_month_series
+
+        # Sobre los valores ÚNICOS (no la columna entera): el dataset puede
+        # tener cientos de miles de filas y esto corre en cada rerun.
+        vig_unicos = pd.Series(df_merged["Mes Vigencia"].dropna().unique())
+        dt = pd.to_datetime(
+            normalize_month_series(vig_unicos), format="%m-%Y", errors="coerce"
+        )
+        if dt.notna().any():
+            vigencia = dt.max().strftime("%m-%Y")
+
+    partes = [f"Cobertura del tarifario: **{cob['filas'] * 100:.1f}%** de las filas"]
+    if cob["importe"] is not None:
+        partes.append(f"**{cob['importe'] * 100:.1f}%** del importe")
+    if vigencia:
+        partes.append(f"Tarifario al **{vigencia}**")
+    st.caption(" · ".join(partes))
+
+    if cob["importe_sin_tarifa"]:
+        st.caption(
+            f"⚠️ Quedan **{format_currency(cob['importe_sin_tarifa'])}** de consumo "
+            "sin tarifa (no entra a la simulación): medicamentos, 'No asignado' u "
+            "otras prestaciones sin valor convenido."
+        )
+
 
 def _metric_card(label: str, value: str, delta: str = "", delta_color: str = "#E4002B", icon: str = "") -> None:
     """Renderiza una card de métrica estilo Swiss Medical."""
@@ -201,6 +242,7 @@ def render() -> None:
 
     cargando.empty()
     st.caption(f"Datos listos · **{format_int(len(df_merged))}** registros")
+    _render_cobertura_y_tarifario(df_consumo, df_merged)
 
     config = render_simulator_controls(df_merged, prestadores=catalogo)
 
@@ -296,6 +338,9 @@ def render() -> None:
         prestador_id=config["prestador_id"],
     )
 
+    st.divider()
+    _render_validador_workbook()
+
 
 # ============================================================================
 # HELPERS PRIVADOS
@@ -332,6 +377,82 @@ def _render_negociacion(
         rows.append(row)
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_validador_workbook() -> None:
+    """
+    Validador de confianza: subir un workbook del negocio y verificar que el
+    motor de la app reproduce su Impacto, por dos rutas independientes
+    (reconstruido Cantidad×Valor vs los Q×P que el workbook ya trae).
+
+    No depende de la simulación en pantalla: es un chequeo autónomo del motor
+    contra un archivo de referencia. Si las dos rutas coinciden, el workbook es
+    internamente consistente y la app lo reproduce.
+    """
+    with st.expander("🔍 Validar contra un workbook del negocio", expanded=False):
+        st.caption(
+            "Subí una simulación ya resuelta por el equipo (hoja 'Simulación'). "
+            "La app recalcula el Impacto con su propio motor y muestra el desvío "
+            "entre dos rutas independientes — una verificación de confianza."
+        )
+        up = st.file_uploader(
+            "Workbook (.xlsx)", type=["xlsx"], key="val_workbook",
+            help="El archivo no se guarda: se procesa en memoria solo para validar.",
+        )
+        if up is None:
+            return
+
+        from core.workbook_validacion import validar_workbook
+
+        try:
+            res = validar_workbook(up.getvalue())
+        except Exception as e:  # noqa: BLE001 — mensaje entendible al usuario
+            st.error(
+                "No se pudo leer el workbook. Verificá que tenga una hoja "
+                f"'Simulación' con la columna 'Cantidad CM'. (Detalle: {e})"
+            )
+            return
+
+        st.caption(
+            f"{format_int(res['n_filas'])} filas · "
+            f"{format_int(res['n_pauta'])} en universo Pauta"
+        )
+
+        filas = []
+        for nombre, esc in (("Solicitado", res["solicitado"]),
+                            ("Propuesto", res["propuesto"])):
+            if esc is None:
+                continue
+            fila = {
+                "Escenario": nombre,
+                "Impacto % (app)": f"{esc['impacto_pct'] * 100:.4f}%",
+                "Impacto anual": format_currency_full(esc["impacto"]),
+                "Impacto mensual": format_currency_full(esc["impacto_mensual"]),
+            }
+            if esc.get("desvio_qxp") is not None:
+                fila["Desvío vs Q×P del negocio"] = f"{esc['desvio_qxp'] * 100:.6f}%"
+            filas.append(fila)
+
+        if not filas:
+            st.warning("El workbook no trae valores simulables (Solicitado/Propuesto).")
+            return
+
+        st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
+
+        desvios = [
+            esc["desvio_qxp"] for esc in (res["solicitado"], res["propuesto"])
+            if esc and esc.get("desvio_qxp") is not None
+        ]
+        if desvios and max(desvios) < 1e-6:
+            st.success(
+                "✅ El motor de la app reproduce el workbook: las dos rutas "
+                "(reconstruido y Q×P del negocio) coinciden (desvío < 0,0001%)."
+            )
+        elif desvios:
+            st.warning(
+                f"Desvío máximo entre rutas: {max(desvios) * 100:.4f}%. "
+                "Revisá que el workbook no tenga filas con Q×P inconsistentes."
+            )
 
 
 def _render_waiting_state(consumo_loaded: bool, valores_loaded: bool) -> None:
