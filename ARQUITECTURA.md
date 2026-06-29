@@ -7,11 +7,17 @@
 > pero hoy se ejecuta local en la compu, en fase de pruebas. Tema compliance de
 > datos médicos en cloud → pendiente de definir (lo salteamos por ahora).
 >
-> **🔒 Decisión tomada (Fase 1):** la capa de datos es **DuckDB local**, NO
-> Supabase. Motivo: los datos médicos/de prestadores no pueden salir de la
-> máquina ("todo local") y no hay acceso a infra cloud aprobada todavía.
-> Supabase/PostgreSQL queda como **fase futura de nube**, cuando haya acceso a
-> AWS + aprobación de compliance. Ver `memory/simulador-cm-datos-decision.md`.
+> **🔒 Decisión inicial (Fase 1):** la capa de datos era **DuckDB local**, NO
+> Supabase. Motivo: los datos médicos/de prestadores no podían salir de la
+> máquina ("todo local") y no había infra cloud aprobada todavía.
+>
+> **🟢 Actualización (nube habilitada):** con luz verde para usar servicios
+> cloud y el objetivo de uso por **equipo / web**, se incorporó **Supabase
+> (PostgreSQL)** como **fuente de verdad opcional**. Los datos (tarifas y
+> consumos agregados por prestación — sin datos de pacientes) viven en el schema
+> `simulador`. **DuckDB local queda como fallback** automático: si no hay config
+> de Supabase en los secrets, la app sigue 100% local como antes. Setup y
+> detalles en **`docs/SUPABASE.md`**.
 
 ---
 
