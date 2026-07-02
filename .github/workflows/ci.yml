@@ -21,11 +21,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Liviano a propósito: lint + smoke tests no necesitan TensorFlow/LightGBM
-      # (se cargan con import lazy). streamlit + pandas/numpy alcanzan para
-      # importar los módulos core/ui bajo test.
+      # Liviano a propósito: no instalamos TensorFlow/LightGBM (pesados, se
+      # cargan con import lazy y sus tests se saltean). Sí duckdb y openpyxl,
+      # que son livianos y habilitan la cobertura pura de la ingesta
+      # (test_ingesta) y del validador de workbooks (test_workbook_validacion)
+      # en CI, sin datos sensibles.
       - name: Instalar herramientas
-        run: pip install --no-cache-dir -r requirements-dev.txt pandas numpy streamlit
+        run: pip install --no-cache-dir -r requirements-dev.txt pandas numpy streamlit duckdb openpyxl
 
       - name: Lint (ruff)
         run: ruff check src tests

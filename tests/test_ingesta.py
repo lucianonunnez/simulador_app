@@ -15,9 +15,14 @@ los tres blindajes de la ingesta:
 import sys
 from pathlib import Path
 
-import duckdb
 import pandas as pd
 import pytest
+
+# DuckDB es la base de la ingesta. En un entorno mínimo sin duckdb (p. ej. si
+# el CI se corriera aún más liviano) estos tests se saltean en vez de romper la
+# colección; con el stack completo corren normalmente. Va ANTES de importar
+# ingest / core.db, que también dependen de duckdb.
+duckdb = pytest.importorskip("duckdb")
 
 # El script vive en scripts/ (no es un paquete): se agrega al path a mano.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))

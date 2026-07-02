@@ -16,7 +16,11 @@ from io import BytesIO
 
 import pytest
 
-from core.workbook_validacion import extraer_simulacion, validar_workbook
+# El fixture sintético se arma con openpyxl (mismo motor que lee los workbooks
+# reales). En un entorno sin openpyxl el módulo se saltea en vez de romper.
+pytest.importorskip("openpyxl")
+
+from core.workbook_validacion import extraer_simulacion, validar_workbook  # noqa: E402
 
 # Universo Pauta del workbook sintético (ventana anual, n_meses=12):
 #   pid 101: cant 10 × vact 1000 → act 10.000 | sol 11.000 | prop 10.500
