@@ -1,0 +1,8 @@
+# Dependencia OPCIONAL: solo hace falta para la comparativa con la red
+# neuronal del Módulo 3 (modelos .keras + scalers_pablo.pkl). Sin esto la app
+# funciona igual en modo LightGBM-only, ahorrando ~950MB de disco instalado y
+# ~500MB de RAM al importar (medido con TF 2.16 cpu). Ojo que LightGBM le
+# gana a la red en importe y cantidad (ver models/metricas_final.json).
+#
+#   pip install -r requirements-nn.txt
+tensorflow-cpu>=2.15.0,<2.17.0

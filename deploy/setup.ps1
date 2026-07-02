@@ -50,7 +50,7 @@ if (Test-Path $VenvPython) {
 }
 
 # --- 2. Instalar dependencias -----------------------------------------------
-Step "Actualizando pip e instalando dependencias (puede tardar por tensorflow)"
+Step "Actualizando pip e instalando dependencias (tensorflow ya no va por default; ver requirements-nn.txt)"
 & $VenvPython -m pip install --upgrade pip `
     --trusted-host pypi.org --trusted-host files.pythonhosted.org
 & $VenvPython -m pip install -r requirements.txt `

@@ -7,9 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar requirements primero para cachear la capa
-COPY requirements.txt .
+# Copiar requirements primero para cachear la capa.
+# NOTA: tensorflow-cpu NO se instala por default (es opcional, ver
+# requirements-nn.txt): la imagen queda ~950MB más liviana y usar el Módulo 3
+# cuesta ~500MB menos de RAM. El módulo funciona en modo LightGBM; para
+# habilitar la comparativa con la red neuronal, descomentá la línea.
+COPY requirements.txt requirements-nn.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+# RUN pip install --no-cache-dir -r requirements-nn.txt
 
 # Copiar archivos de la app.
 # OJO: de .streamlit/ solo va config.toml — el secrets.toml JAMÁS entra a la

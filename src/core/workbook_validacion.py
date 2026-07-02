@@ -79,11 +79,16 @@ def extraer_simulacion(file_bytes: bytes) -> pd.DataFrame:
     pidc = i1("idPrestacion", "Cod")
     paut = i1("Pauta/No pauta", "Pauta / No pauta")
 
+    def cell(r, j):
+        # Las filas de read_only pueden venir más cortas que el encabezado:
+        # tratar la celda ausente como vacía, no como IndexError.
+        if j is None or j >= len(r):
+            return None
+        return r[j]
+
     def num(r, j):
-        if j is None:
-            return np.nan
         try:
-            return float(r[j])
+            return float(cell(r, j))
         except (TypeError, ValueError):
             return np.nan
 
@@ -94,12 +99,12 @@ def extraer_simulacion(file_bytes: bytes) -> pd.DataFrame:
         cant = num(r, ci)
         if cant != cant:  # NaN -> fila de título/subtotal
             continue
+        pauta_val = cell(r, paut)
         recs.append({
-            "tipo": r[tipc] if tipc is not None else None,
-            "nomen": r[nomc] if nomc is not None else None,
+            "tipo": cell(r, tipc),
+            "nomen": cell(r, nomc),
             "pid": num(r, pidc),
-            "pauta": (str(r[paut]).strip()
-                      if paut is not None and r[paut] is not None else None),
+            "pauta": str(pauta_val).strip() if pauta_val is not None else None,
             "cant": cant,
             "vact": num(r, va[0]) if len(va) > 0 else np.nan,
             "vsol": num(r, vs[0]) if len(vs) > 0 else np.nan,
@@ -156,6 +161,11 @@ def validar_workbook(file_bytes: bytes) -> dict:
         }
     """
     df = extraer_simulacion(file_bytes)
+    if df.empty:
+        # Hoja 'Simulación' sin filas de datos: resultado vacío con mensaje de
+        # negocio en la UI, no un KeyError (df vacío no trae ni las columnas).
+        return {"n_filas": 0, "n_pauta": 0, "solicitado": None, "propuesto": None}
+
     pauta = df[df["pauta"] == "Pauta"] if "pauta" in df.columns else df
     universo = pauta if len(pauta) else df
 

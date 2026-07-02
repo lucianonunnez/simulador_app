@@ -8,12 +8,14 @@ cacheadas de la página, los reruns tardaban varios segundos con volumen real
 (los elementos "fantasma" de la página anterior quedaban visibles mientras
 tanto).
 
-df_fingerprint reemplaza el hasheo del contenido completo por una huella
-O(columnas) + una suma vectorizada: (filas, columnas, suma de las columnas
-numéricas). Dos DataFrames distintos del dominio (otro prestador, otro mes,
-otro filtro) difieren prácticamente siempre en esa huella; la colisión
-requeriría mismas filas, mismas columnas y misma suma exacta de todos los
-importes/cantidades.
+df_fingerprint reemplaza el hasheo profundo de Streamlit por
+(filas, columnas, hash vectorizado del contenido). El hash usa
+pd.util.hash_pandas_object (C vectorizado): ~107 ms medidos para 500k filas
+x 8 columnas — un orden de magnitud más barato que el hasheo de Streamlit y,
+a diferencia de la huella anterior (suma de columnas numéricas), detecta
+cambios SOLO de texto (p.ej. un tarifario corregido donde únicamente cambió
+el Nomenclador o el flag Pauta/No pauta). Con la huella vieja esos cambios
+colisionaban y la app servía resultados financieros viejos desde el caché.
 
 Uso:
     @st.cache_data(hash_funcs={pd.DataFrame: df_fingerprint})
@@ -27,8 +29,17 @@ import pandas as pd
 def df_fingerprint(df: pd.DataFrame) -> tuple:
     """Huella barata y estable de un DataFrame para claves de caché."""
     if df is None or len(df) == 0:
-        return (0, tuple(map(str, getattr(df, "columns", ()))), 0.0)
+        return (0, tuple(map(str, getattr(df, "columns", ()))), 0)
 
-    numericas = df.select_dtypes(include="number")
-    total = float(numericas.sum().sum()) if len(numericas.columns) else 0.0
-    return (len(df), tuple(map(str, df.columns)), total)
+    try:
+        # Hash por fila combinando todas las columnas (numéricas y de texto),
+        # sumado (insensible al orden de filas, igual que la huella anterior).
+        contenido = int(pd.util.hash_pandas_object(df, index=False).sum())
+    except TypeError:
+        # Columnas object con valores no hasheables (listas/dicts): degradar
+        # a la huella numérica vieja antes que romper el rerun.
+        numericas = df.select_dtypes(include="number")
+        contenido = (
+            float(numericas.sum().sum()) if len(numericas.columns) else 0.0
+        )
+    return (len(df), tuple(map(str, df.columns)), contenido)

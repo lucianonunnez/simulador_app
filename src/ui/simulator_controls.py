@@ -12,6 +12,8 @@ Controles del simulador — renderizados inline en el cuerpo principal.
 
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -113,9 +115,15 @@ def _render_ajustes_prestacion(df_scope: pd.DataFrame, config: dict, base: float
         return
 
     editor_df = pd.DataFrame(filas)
+    # Key derivada del conjunto de prestaciones seleccionadas: el data_editor
+    # guarda las ediciones por índice de fila, así que si cambia la selección (y
+    # con ella el orden de las filas) una key fija dejaría un $ editado apuntando
+    # a OTRA prestación. Al depender del conjunto, un cambio de selección estrena
+    # un editor limpio y desecha las ediciones viejas.
+    pids = tuple(sorted(f["_pid"] for f in filas))
     edited = st.data_editor(
         editor_df.drop(columns=["_pid"]),
-        key="sim_prest_editor",
+        key=f"sim_prest_editor_{hash(pids)}",
         hide_index=True,
         use_container_width=True,
         num_rows="fixed",
@@ -288,9 +296,12 @@ def render_simulator_controls(
                 cols = st.columns(min(len(grupos_sel), 3))
                 for i, nom in enumerate(grupos_sel):
                     with cols[i % len(cols)]:
+                        # html.escape: el nombre del grupo viene de los DATOS
+                        # (columna Nomenclador) y se interpola en HTML — sin
+                        # escapar era un XSS almacenado.
                         st.markdown(
                             f"<div style='font-size:12px; color:#212529; font-weight:500; "
-                            f"margin-bottom:2px;'>{nom[:28]}</div>",
+                            f"margin-bottom:2px;'>{html.escape(nom[:28])}</div>",
                             unsafe_allow_html=True,
                         )
                         pct = st.number_input(

@@ -118,9 +118,9 @@ def _render_inicio() -> None:
         c4.metric("Tarifas (valores)", format_int(resumen["tarifas"]))
     else:
         st.info(
-            "**Todavía no hay datos cargados.** Abrí la sección "
-            "**«Carga de datos»** del menú izquierdo: podés subir archivos o "
-            "ingerir lo que dejes en `data/raw/` con un click."
+            "**Todavía no hay datos cargados.** Entrá a cualquier módulo "
+            "(menú izquierdo) y abrí **«Carga de datos»** en el sidebar: ahí "
+            "podés subir archivos o ingerir lo que dejes en `data/raw/` con un click."
         )
 
     st.markdown("<div style='margin-bottom:24px'></div>", unsafe_allow_html=True)
@@ -143,8 +143,8 @@ def _render_inicio() -> None:
          "Detección de anomalías en costos por prestador, prestación o grupo, "
          "con análisis temporal y estructural."),
         ("Módulo 3 — Predicción ML",
-         "Pronóstico con LightGBM y red neuronal. Comparativa de modelos con "
-         "métricas de performance."),
+         "Predicción con LightGBM sobre meses históricos (backtest) y "
+         "comparativa opcional con red neuronal, con métricas de performance."),
     ]
 
     cols = st.columns(3)
@@ -160,6 +160,23 @@ def _render_inicio() -> None:
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# KEEP-ALIVE DE ESTADO ENTRE MÓDULOS
+# ============================================================================
+# Workaround conocido de Streamlit multipágina "por radio": al cambiar de
+# módulo, los widgets del módulo anterior dejan de renderizarse y Streamlit
+# descarta sus keys de session_state. Sin esto, al volver a un módulo el
+# prestador, los meses, el % de aumento, los ajustes por grupo/prestación y las
+# exclusiones vuelven a su valor por defecto. Re-asignar cada key a sí misma la
+# marca como estado de usuario (pasa a _old_state) y evita que se recolecte, así
+# el módulo recupera exactamente lo que el usuario había dejado.
+# Prefijos verificados en src/ui/*_controls.py y *_tabs.py.
+_KEEP_ALIVE_PREFIXES = ("sim_", "grp_", "comp_", "mega_", "anomaly_", "ranking_", "ml_")
+for _k in list(st.session_state.keys()):
+    if _k.startswith(_KEEP_ALIVE_PREFIXES):
+        st.session_state[_k] = st.session_state[_k]
 
 
 # ============================================================================

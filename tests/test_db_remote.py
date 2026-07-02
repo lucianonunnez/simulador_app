@@ -41,6 +41,35 @@ def test_build_select_escapa_identificadores():
     assert '"sch""x"."tab""y"' in sql
 
 
+def test_dsn_fuerza_sslmode_require():
+    """TLS no negociable hacia Supabase: si el DSN no trae sslmode se agrega
+    require; si el usuario ya definió uno (p. ej. verify-full), se respeta."""
+    assert db_remote._forzar_sslmode(
+        "postgresql://u:p@h:5432/db"
+    ) == "postgresql://u:p@h:5432/db?sslmode=require"
+    # DSN con query string previa: se agrega con '&', no con un segundo '?'.
+    assert db_remote._forzar_sslmode(
+        "postgresql://u:p@h:5432/db?connect_timeout=5"
+    ) == "postgresql://u:p@h:5432/db?connect_timeout=5&sslmode=require"
+    # Un sslmode explícito del usuario no se pisa.
+    dsn = "postgresql://u:p@h:5432/db?sslmode=verify-full"
+    assert db_remote._forzar_sslmode(dsn) == dsn
+
+    # Camino real por variable de entorno (deploy headless).
+    import os
+
+    prev = os.environ.get("SUPABASE_DATABASE_URL")
+    try:
+        os.environ["SUPABASE_DATABASE_URL"] = "postgresql://u:p@h:5432/db"
+        cfg = db_remote._read_secrets()
+        assert cfg["database_url"].endswith("?sslmode=require")
+    finally:
+        if prev is None:
+            os.environ.pop("SUPABASE_DATABASE_URL", None)
+        else:
+            os.environ["SUPABASE_DATABASE_URL"] = prev
+
+
 def test_remote_no_configurado_sin_secrets():
     """Sin secrets ni env var, remote_configured() es False -> la app usa DuckDB
     y el camino existente queda intacto."""

@@ -1,7 +1,7 @@
 """
 Tabs del Módulo 3 (Predicción ML):
-    1. Predicción → gráfico histórico + forecast
-    2. Comparativa → LightGBM vs Red Neuronal lado a lado
+    1. Predicción → real vs predicho sobre meses históricos (backtest)
+    2. Comparativa → LightGBM vs Red Neuronal lado a lado (si la red está)
     3. Variables influyentes → qué variables pesan más
     4. Detalle técnico → iteración de la red + corrección de data leakage
     5. Sobre los modelos → explicación técnica
@@ -20,7 +20,7 @@ from core.ml_predictor import (
     predecir_lightgbm,
     predecir_pablo,
 )
-from ui.formatters import format_currency, format_quantity, safe_pct
+from ui.formatters import format_currency, format_int, format_quantity, safe_pct
 from ui.insights import insight_prediccion
 from ui.theme import (
     COLOR_PRINCIPAL,
@@ -75,6 +75,11 @@ def render_tabs(df_consumo: pd.DataFrame, config: dict) -> None:
 # ============================================================================
 def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
     st.subheader("Predicción")
+    st.caption(
+        "Los puntos graficados son **meses históricos re-puntuados por el modelo "
+        "(backtest)**: sirven para evaluar qué tan bien ajusta, no son un "
+        "pronóstico de meses futuros."
+    )
 
     if not config["models"]:
         st.warning("Seleccioná al menos un modelo en el sidebar.")
@@ -94,10 +99,15 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
     )
 
     with st.spinner(f"Generando predicciones con {modelo_principal}..."):
-        if modelo_principal == "lightgbm":
-            pred = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])
-        else:
-            pred = predecir_pablo(df, config["metric"], config["filtro_prestador"])
+        try:
+            if modelo_principal == "lightgbm":
+                pred = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])
+            else:
+                pred = predecir_pablo(df, config["metric"], config["filtro_prestador"])
+        except (FileNotFoundError, RuntimeError, ValueError) as e:
+            # Mensaje claro en lugar del traceback crudo de Streamlit
+            st.error(f"No se pudo cargar/aplicar el modelo: {e}")
+            return
 
     if len(pred) == 0:
         st.warning(
@@ -116,7 +126,7 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
 
     # --- Métricas resumen ---
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Registros", f"{len(pred):,}")
+    c1.metric("Registros", format_int(len(pred)))
     c2.metric("Meses", len(ts))
 
     fmt = format_currency if config["metric"] in ("importe", "precio") else format_quantity
@@ -125,8 +135,12 @@ def _tab_prediccion(df: pd.DataFrame, config: dict) -> None:
     error_pct = safe_pct(total_pred - total_real, total_real)
 
     c3.metric("Real total", fmt(total_real))
+    # El delta es un error de predicción (predicho − real): ni sobreestimar ni
+    # subestimar es "bueno", así que se muestra neutro. Sin delta_color, una
+    # sobreestimación quedaba en verde, sugiriendo que estaba bien.
     c4.metric("Predicho total", fmt(total_pred),
-              f"{error_pct:+.1f}%" if error_pct is not None else None)
+              f"{error_pct:+.1f}%" if error_pct is not None else None,
+              delta_color="off")
 
     # --- Gráfico ---
     fig = go.Figure()
@@ -178,10 +192,19 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
     st.subheader("Comparativa de modelos")
 
     if len(config["models"]) < 2:
-        st.info(
-            "Activá **ambos modelos** en el sidebar (LightGBM + Red Neuronal) "
-            "para ver la comparativa lado a lado."
-        )
+        if not config.get("nn_disponible", True):
+            # La red no está en esta instalación: avisar sin pantalla de error
+            st.info(
+                "La comparativa lado a lado necesita la **red neuronal**, que no "
+                "está disponible en esta instalación (archivo faltante/puntero "
+                "LFS sin resolver, o tensorflow sin instalar — ver el aviso al "
+                "inicio del módulo). El resto del módulo funciona con LightGBM."
+            )
+        else:
+            st.info(
+                "Activá **ambos modelos** en el sidebar (LightGBM + Red Neuronal) "
+                "para ver la comparativa lado a lado."
+            )
         return
 
     # Métricas del entrenamiento
@@ -194,10 +217,10 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
         m = metricas_all.get(key, {})
         rows.append({
             "Modelo": MODEL_LABEL.get(model_name, model_name),
-            "MAE": f"{m.get('mae', 0):,.2f}",
+            "MAE": format_quantity(m.get("mae", 0)),
             "R²": f"{m.get('r2', 0):.4f}",
-            "N train": f"{m.get('n_train', 0):,}",
-            "N test": f"{m.get('n_test', 0):,}",
+            "N train": format_int(m.get("n_train", 0)),
+            "N test": format_int(m.get("n_test", 0)),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -209,11 +232,20 @@ def _tab_comparativa(df: pd.DataFrame, config: dict) -> None:
     st.divider()
 
     # Predicciones lado a lado
-    st.write("### Predicciones aplicadas sobre tus datos")
+    st.write("### Backtest sobre tus datos")
+    st.caption(
+        "Meses históricos re-puntuados por ambos modelos (backtest), "
+        "no un pronóstico de meses futuros."
+    )
 
     with st.spinner("Generando predicciones de ambos modelos..."):
-        pred_lgb = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])
-        pred_pablo = predecir_pablo(df, config["metric"], config["filtro_prestador"])
+        try:
+            pred_lgb = predecir_lightgbm(df, config["metric"], config["filtro_prestador"])
+            pred_pablo = predecir_pablo(df, config["metric"], config["filtro_prestador"])
+        except (FileNotFoundError, RuntimeError, ValueError) as e:
+            # Mensaje claro en lugar del traceback crudo de Streamlit
+            st.error(f"No se pudo cargar/aplicar alguno de los modelos: {e}")
+            return
 
     if len(pred_lgb) == 0 or len(pred_pablo) == 0:
         st.warning("No hay suficientes datos para generar predicciones.")
@@ -432,10 +464,10 @@ def _tab_sobre_modelos() -> None:
             rows.append({
                 "Modelo": partes[0],
                 "Métrica": partes[1],
-                "MAE": f"{m.get('mae', 0):,.2f}",
+                "MAE": format_quantity(m.get("mae", 0)),
                 "R²": f"{m.get('r2', 0):.4f}",
-                "N train": f"{m.get('n_train', 0):,}",
-                "N test": f"{m.get('n_test', 0):,}",
+                "N train": format_int(m.get("n_train", 0)),
+                "N test": format_int(m.get("n_test", 0)),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 

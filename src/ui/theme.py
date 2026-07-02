@@ -31,6 +31,10 @@ def layout_base(title: str = "", height: int = 450) -> dict:
         plot_bgcolor=COLOR_BLANCO,
         paper_bgcolor=COLOR_FONDO,
         font=dict(family="Roboto", color=COLOR_TEXTO),
+        # Localización es-AR de los números de Plotly (ejes y hovers): decimal
+        # con coma, miles con punto. Sin esto los ejes mostraban "$1,234,567"
+        # (formato US) al lado de las tablas es-AR "$1.234.567".
+        separators=",.",
         hovermode="x unified",
         height=height,
         xaxis=dict(

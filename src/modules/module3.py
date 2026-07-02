@@ -3,11 +3,12 @@ Módulo 3 — Predicción ML.
 
 Orquesta:
 1. Reusa carga de datos del Módulo 1 (caché compartido).
-2. Verifica que los modelos estén disponibles.
+2. Verifica que los modelos estén disponibles (degradación parcial: con los
+   LightGBM alcanza; la red neuronal es opcional y solo suma la comparativa).
 3. Controles en sidebar (ui/ml_controls).
 4. Renderizado de 5 tabs (ui/ml_tabs).
 
-Si faltan modelos, muestra instrucciones para subirlos.
+Si faltan los LightGBM (el mínimo), muestra instrucciones para subirlos.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import streamlit as st
 
 from core.data_loader import get_normalized_consumo, load_consumo_and_valores
-from core.ml_predictor import modelos_disponibles
+from core.ml_predictor import estado_modelos
 from ui.formatters import format_int
 from ui.ml_controls import render_ml_controls
 from ui.ml_tabs import render_tabs
@@ -24,13 +25,16 @@ from ui.ml_tabs import render_tabs
 def render() -> None:
     st.title("Módulo 3 — Predicción ML")
 
-    # --- Verificar modelos ---
-    status = modelos_disponibles()
-    faltantes = [k for k, v in status.items() if not v]
+    # --- Verificar modelos: LightGBM es el mínimo; la red neuronal, opcional ---
+    estado = estado_modelos()
 
-    if faltantes:
-        st.error("**No se encontraron todos los modelos pre-entrenados**")
-        st.markdown(f"Faltan: `{', '.join(faltantes)}`")
+    if not estado["lightgbm_ok"]:
+        faltantes = [
+            k for k, v in estado["detalle"].items()
+            if not v and k.startswith("lightgbm")
+        ]
+        st.error("**No se encontraron los modelos LightGBM (mínimo para predecir)**")
+        st.markdown(f"Faltan o no son usables: `{', '.join(faltantes)}`")
         st.info("""
         **Cómo solucionarlo:**
 
@@ -41,6 +45,13 @@ def render() -> None:
         Ante dudas, contactá al área de Datos/IA.
         """)
         return
+
+    if not estado["nn_ok"]:
+        # Aviso discreto: el módulo funciona igual, solo sin la comparativa NN
+        st.caption(
+            f"Comparativa con red neuronal no disponible: {estado['nn_motivo']}. "
+            "El módulo funciona en modo LightGBM."
+        )
 
     # --- Datos ---
     df_consumo, _ = load_consumo_and_valores()
@@ -64,7 +75,10 @@ def render() -> None:
     )
 
     # --- Controles sidebar ---
-    config = render_ml_controls(prestadores_disponibles=prestadores)
+    config = render_ml_controls(
+        prestadores_disponibles=prestadores,
+        nn_disponible=estado["nn_ok"],
+    )
 
     # --- Tabs ---
     render_tabs(df_consumo, config)

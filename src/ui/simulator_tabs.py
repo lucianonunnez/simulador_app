@@ -5,6 +5,7 @@ v0.5.2 — diseño Swiss Medical
 
 from __future__ import annotations
 
+import html
 import logging
 
 import numpy as np
@@ -19,7 +20,13 @@ from core.cachekeys import df_fingerprint
 from ui.insights import insight_concentracion, insight_evolucion
 from core.indec import fetch_inflation
 from core.simulator import aggregate_top_n
-from ui.formatters import format_currency, format_currency_full, format_int, format_quantity
+from ui.formatters import (
+    format_currency,
+    format_currency_full,
+    format_int,
+    format_pct,
+    format_quantity,
+)
 from ui.theme import (
     COLOR_BLANCO,   # noqa: F401  (re-export histórico)
     COLOR_FONDO,
@@ -104,7 +111,7 @@ def _tabla_historico_pauta(df_time: pd.DataFrame, tick_texts: list[str]) -> None
         logger.exception("No se pudo obtener inflación INDEC para la tabla histórica")
 
     fila_indec = [
-        f"{infl_map[m]:.1f}%" if m in infl_map else "—" for m in meses_periodo
+        format_pct(infl_map[m], 1) if m in infl_map else "—" for m in meses_periodo
     ]
     fila_aumento = ["—"] * len(meses_periodo)   # reservado: aún sin histórico
 
@@ -338,7 +345,7 @@ def _tab_nomenclador(df: pd.DataFrame) -> None:
         # pero podemos formatear: mostrar vacío si < 5%
         total_val = df_agg["Consumo Ideal"].sum()
         fig.update_traces(
-            text=[f"{v/total_val*100:.1f}%" if total_val > 0 and v/total_val >= 0.05 else ""
+            text=[format_pct(v/total_val*100, 1) if total_val > 0 and v/total_val >= 0.05 else ""
                   for v in df_agg["Consumo Ideal"]],
             textinfo="text",
         )
@@ -425,7 +432,10 @@ def _detalle_otros(df: pd.DataFrame, group_col: str, value_col: str, top_n: int 
     if len(full) <= top_n:
         return ""
     tail = full.iloc[top_n:]
-    nombres = [str(n) for n in tail.index]
+    # html.escape: los nombres vienen de los DATOS y este texto termina en el
+    # hovertemplate (Plotly interpreta HTML en los hovers) — sin escapar, una
+    # megacuenta con markup en el nombre se inyectaba en el hover.
+    nombres = [html.escape(str(n)) for n in tail.index]
     muestra = ", ".join(nombres[:10])
     extra = f" y {len(nombres) - 10} más" if len(nombres) > 10 else ""
     return f"Agrupa {len(nombres)} categorías: {muestra}{extra}"
@@ -483,7 +493,7 @@ def _tab_megacuenta(df: pd.DataFrame) -> None:
             for m in df_mega["Megacuenta"]
         ]
         fig.update_traces(
-            text=[f"{v/total_mega*100:.1f}%" if total_mega > 0 and v/total_mega >= 0.05 else ""
+            text=[format_pct(v/total_mega*100, 1) if total_mega > 0 and v/total_mega >= 0.05 else ""
                   for v in df_mega["Consumo Ideal"]],
             textinfo="text",
             textposition="inside",
@@ -729,9 +739,11 @@ def _tab_analisis(df: pd.DataFrame) -> None:
     with c1:
         st.write("### Impacto Financiero")
         if pct > 0:
-            st.success(f"Aumento proyectado: **{format_currency(dif)}** ({pct:+.2f}%)")
+            # Un aumento de costo es un impacto negativo para el negocio: rojo
+            # (coherente con las cards del Módulo 1, que pintan el aumento en rojo).
+            st.error(f"Aumento proyectado: **{format_currency(dif)}** ({format_pct(pct)})")
         elif pct < 0:
-            st.warning(f"Reducción proyectada: **{format_currency(abs(dif))}** ({pct:.2f}%)")
+            st.success(f"Reducción proyectada: **{format_currency(abs(dif))}** ({format_pct(pct)})")
         else:
             st.info("Sin cambio respecto del valor actual")
 

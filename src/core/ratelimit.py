@@ -20,8 +20,12 @@ from collections import defaultdict
 MAX_INTENTOS = 5
 VENTANA_SEG = 600
 BLOQUEO_SEG = 900
+# Umbral alternativo pensado para el bucket POR IP: más alto que el de
+# username para frenar ataques distribuidos entre cuentas, sin que unos pocos
+# fallos ajenos alcancen para bloquearle la cuenta (DoS) a un usuario legítimo.
+MAX_INTENTOS_IP = 15
 
-# {clave (username o "global"): [timestamps de fallos]}
+# {clave ("user:<username>", "ip:<ip>" o "global"): [timestamps de fallos]}
 _fallos: dict[str, list[float]] = defaultdict(list)
 
 
@@ -34,16 +38,21 @@ def registrar_fallo(clave: str, ahora: float | None = None) -> None:
     _fallos[clave] = [t for t in _fallos[clave] if t >= limite]
 
 
-def segundos_bloqueado(clave: str, ahora: float | None = None) -> int:
+def segundos_bloqueado(
+    clave: str, ahora: float | None = None, max_intentos: int | None = None
+) -> int:
     """
     Segundos restantes de bloqueo para la clave (0 = no bloqueada).
 
-    Bloqueada si acumuló MAX_INTENTOS fallos dentro de VENTANA_SEG; el bloqueo
-    dura BLOQUEO_SEG desde el último fallo.
+    Bloqueada si acumuló `max_intentos` fallos (default: MAX_INTENTOS) dentro
+    de VENTANA_SEG; el bloqueo dura BLOQUEO_SEG desde el último fallo. El
+    umbral es parametrizable porque el bucket por IP usa uno más alto
+    (MAX_INTENTOS_IP) que el bucket por username.
     """
+    umbral = MAX_INTENTOS if max_intentos is None else max_intentos
     ahora = time.time() if ahora is None else ahora
     recientes = [t for t in _fallos.get(clave, []) if t >= ahora - VENTANA_SEG]
-    if len(recientes) < MAX_INTENTOS:
+    if len(recientes) < umbral:
         return 0
     fin_bloqueo = max(recientes) + BLOQUEO_SEG
     return max(int(fin_bloqueo - ahora), 0)
