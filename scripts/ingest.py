@@ -15,8 +15,14 @@ Uso:
     python scripts/ingest.py --status   # muestra qué hay cargado
 
 Idempotencia:
-  - Cada archivo se identifica por hash SHA-256; si ya se ingirió, se saltea
-    (volver a correr el script no duplica datos).
+  - Cada archivo se identifica por hash SHA-256 + el mes que se le asigna de
+    AFUERA (--mes o el nombre del archivo, para los consumos crudos sin
+    columna 'Mes'); si ya se ingirió con ese mes, se saltea (volver a correr
+    el script no duplica datos). Corregir el mes y re-correr SÍ re-ingiere;
+    --force re-ingiere aunque nada haya cambiado.
+  - OJO: re-ingerir con el mes corregido NO borra las filas que la corrida
+    equivocada dejó bajo el otro mes (no hay trazabilidad de origen por fila);
+    el camino seguro tras un mes mal cargado es reconstruir con --rebuild.
   - El upsert reemplaza SOLO las filas de los pares (Prestador ID, Mes) que
     trae el archivo nuevo, sin pisar otros prestadores del mismo mes. Esto hace
     seguro bajar los datos "de a partes".
@@ -77,32 +83,63 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()
 
 
-def _ensure_log(con) -> None:
-    con.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {db.INGEST_LOG_TABLE} (
-            file_hash   VARCHAR PRIMARY KEY,
-            file_name   VARCHAR,
-            tipo        VARCHAR,
-            rows        BIGINT,
-            ingested_at TIMESTAMP
-        )
-        """
+# La identidad de una ingesta es (hash, mes asignado): el 'Mes' de los consumos
+# crudos viene de AFUERA (--mes o el nombre del archivo), así que el mismo
+# archivo re-corrido con el mes CORREGIDO es otra ingesta, no un duplicado.
+_LOG_SCHEMA_SQL = f"""
+    CREATE TABLE IF NOT EXISTS {db.INGEST_LOG_TABLE} (
+        file_hash   VARCHAR,
+        file_name   VARCHAR,
+        tipo        VARCHAR,
+        rows        BIGINT,
+        ingested_at TIMESTAMP,
+        mes         VARCHAR DEFAULT '',
+        PRIMARY KEY (file_hash, mes)
     )
+"""
 
 
-def _already_ingested(con, file_hash: str) -> bool:
+def _ensure_log(con) -> None:
+    if db.table_exists(con, db.INGEST_LOG_TABLE):
+        cols = [
+            r[0]
+            for r in con.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = ?",
+                [db.INGEST_LOG_TABLE],
+            ).fetchall()
+        ]
+        if "mes" in cols:
+            return
+        # Migración de bases anteriores (identidad SOLO por hash, PK simple):
+        # se recrea el log con la clave (hash, mes); lo ya ingerido queda
+        # registrado con mes '' y sigue contando como ingerido.
+        con.execute(
+            f"ALTER TABLE {db.INGEST_LOG_TABLE} RENAME TO _ingest_log_v1"
+        )
+        con.execute(_LOG_SCHEMA_SQL)
+        con.execute(
+            f"INSERT INTO {db.INGEST_LOG_TABLE} SELECT *, '' FROM _ingest_log_v1"
+        )
+        con.execute("DROP TABLE _ingest_log_v1")
+        return
+    con.execute(_LOG_SCHEMA_SQL)
+
+
+def _already_ingested(con, file_hash: str, mes_id: str) -> bool:
     row = con.execute(
-        f"SELECT 1 FROM {db.INGEST_LOG_TABLE} WHERE file_hash = ?", [file_hash]
+        f"SELECT 1 FROM {db.INGEST_LOG_TABLE} WHERE file_hash = ? AND mes = ?",
+        [file_hash, mes_id],
     ).fetchone()
     return row is not None
 
 
 def _align_to_table(con, table: str, df: pd.DataFrame) -> pd.DataFrame:
     """
-    Alinea las columnas del df al esquema de la tabla ya existente:
-    agrega las que falten (NULL) y descarta las de más, para que el esquema
-    quede estable entre archivos de descargas distintas.
+    Alinea las columnas del df al esquema de la tabla ya existente: completa
+    en el df las que falten (NULL) y, si el archivo trae columnas que la tabla
+    NO tiene, las agrega a la tabla (ALTER TABLE ADD COLUMN) en vez de
+    descartarlas en silencio — un export más rico que el primero no pierde datos.
     """
     cols = [
         r[0]
@@ -112,15 +149,35 @@ def _align_to_table(con, table: str, df: pd.DataFrame) -> pd.DataFrame:
             [table],
         ).fetchall()
     ]
+    nuevas = [c for c in df.columns if c not in cols]
+    if nuevas:
+        # El tipo de cada columna nueva lo infiere DuckDB del propio df.
+        con.register("df_cols_nuevas", df[nuevas])
+        tipos = {
+            r[0]: r[1]
+            for r in con.execute("DESCRIBE SELECT * FROM df_cols_nuevas").fetchall()
+        }
+        con.unregister("df_cols_nuevas")
+        for c in nuevas:
+            con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{c}" {tipos[c]}')
+        print(f"    (columnas nuevas agregadas a '{table}': {sorted(nuevas)}; "
+              f"en las filas ya cargadas quedan NULL)")
+        cols += nuevas
     return df.reindex(columns=cols)
 
 
-def _upsert(con, table: str, key: tuple, df: pd.DataFrame) -> None:
+def _upsert(con, table: str, key: tuple, df: pd.DataFrame, expected: set) -> None:
     """Reemplaza las filas de los (key) presentes en df e inserta las nuevas."""
     if not db.table_exists(con, table):
+        # La tabla nace con la UNIÓN del esquema del archivo y las columnas
+        # esperadas del dataset: si el primer archivo trae menos columnas
+        # (p.ej. un export crudo sin 'Tipo Clase CM'), las que falten quedan
+        # como VARCHAR NULL en vez de amputarse del esquema para siempre.
         con.register("df_new", df)
         con.execute(f'CREATE TABLE "{table}" AS SELECT * FROM df_new')
         con.unregister("df_new")
+        for col in sorted(set(expected) - set(df.columns)):
+            con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" VARCHAR')
         return
 
     df = _align_to_table(con, table, df)
@@ -130,13 +187,24 @@ def _upsert(con, table: str, key: tuple, df: pd.DataFrame) -> None:
 
     con.register("df_new", df)
     con.register("keys_new", keys_df)
-    con.execute(
+    borradas = con.execute(
         f'DELETE FROM "{table}" AS t '
         f'WHERE EXISTS (SELECT 1 FROM keys_new AS kk WHERE {cond})'
-    )
+    ).fetchone()[0]
     con.execute(f'INSERT INTO "{table}" SELECT * FROM df_new')
     con.unregister("df_new")
     con.unregister("keys_new")
+
+    # El reemplazo por (key) es POR DISEÑO destructivo dentro de cada par: si
+    # el archivo nuevo trae bastante menos filas que las que pisa, casi seguro
+    # es un re-export PARCIAL y el resto del par se está perdiendo. Avisamos.
+    if borradas and len(df) < borradas * 0.5:
+        print(
+            f"  ! ATENCIÓN: el reemplazo por {key} borró {borradas:,} fila(s) "
+            f"y el archivo nuevo insertó solo {len(df):,}. Si el re-export era "
+            f"parcial, el resto de esos pares SE PERDIÓ: re-ingerí el export "
+            f"completo del período."
+        )
 
 
 def _archivar(path: Path, dest_dir: Path | None = None) -> None:
@@ -182,15 +250,19 @@ def _preparar_consumo(df: pd.DataFrame, path: Path, mes: str | None):
 
 
 def _process_file(con, tipo: str | None, ds: dict | None, path: Path,
-                  rebuild: bool, mes: str | None = None) -> tuple[int, bool]:
+                  rebuild: bool, mes: str | None = None,
+                  force: bool = False) -> tuple[int, bool]:
     """Procesa un archivo. Devuelve (filas_insertadas, procesado_ok) — ok
     incluye 'ya estaba ingerido' (es archivable).
 
     Con tipo=None (bandeja data/a_procesar) el tipo se detecta por el
     CONTENIDO del archivo (clasificar_dataset)."""
     file_hash = _file_hash(path)
-    if not rebuild and _already_ingested(con, file_hash):
-        print(f"  - {path.name}: ya ingerido, saltando")
+    # Identidad de la ingesta = (hash, mes asignado de afuera): re-correr el
+    # mismo archivo con el mes CORREGIDO no debe saltearse.
+    mes_id = xu.mes_desde_nombre(path.name) or mes or ""
+    if not rebuild and not force and _already_ingested(con, file_hash, mes_id):
+        print(f"  - {path.name}: ya ingerido, saltando (--force para re-ingerir)")
         return 0, True
 
     content = path.read_bytes()
@@ -231,11 +303,12 @@ def _process_file(con, tipo: str | None, ds: dict | None, path: Path,
 
     con.execute("BEGIN")
     try:
-        _upsert(con, ds["table"], ds["key"], df)
+        _upsert(con, ds["table"], ds["key"], df, ds["expected"])
         con.execute(
-            f"INSERT INTO {db.INGEST_LOG_TABLE} VALUES (?, ?, ?, ?, ?) "
-            f"ON CONFLICT (file_hash) DO NOTHING",
-            [file_hash, path.name, tipo, len(df), datetime.now()],
+            f"INSERT INTO {db.INGEST_LOG_TABLE} VALUES (?, ?, ?, ?, ?, ?) "
+            f'ON CONFLICT (file_hash, mes) DO UPDATE SET '
+            f'"rows" = excluded."rows", ingested_at = excluded.ingested_at',
+            [file_hash, path.name, tipo, len(df), datetime.now(), mes_id],
         )
         con.execute("COMMIT")
     except Exception as e:
@@ -278,6 +351,11 @@ def main() -> int:
                     help="Período de los archivos de consumo SIN columna 'Mes' "
                          "(el export crudo de MicroStrategy no la trae). "
                          "Ej: --mes 01-2026")
+    ap.add_argument("--force", action="store_true",
+                    help="Re-ingiere aunque el archivo ya figure como ingerido "
+                         "(mismo hash y mes). OJO: no borra las filas que una "
+                         "ingesta previa dejó bajo OTRO mes; tras un mes mal "
+                         "cargado el camino seguro es --rebuild")
     args = ap.parse_args()
 
     if args.mes and not re.fullmatch(r"\d{2}-\d{4}", args.mes):
@@ -320,7 +398,8 @@ def main() -> int:
             files = [p for p in files if p.name == args.solo]
         print(f"[{tipo}] {len(files)} archivo(s) en {ds['dir']}")
         for path in files:
-            filas, ok = _process_file(con, tipo, ds, path, args.rebuild, args.mes)
+            filas, ok = _process_file(con, tipo, ds, path, args.rebuild,
+                                      args.mes, args.force)
             total += filas
             if ok and args.archivar:
                 _archivar(path)
@@ -336,7 +415,8 @@ def main() -> int:
         files = [p for p in files if p.name == args.solo]
     print(f"[a_procesar] {len(files)} archivo(s) en {INBOX_DIR}")
     for path in files:
-        filas, ok = _process_file(con, None, None, path, args.rebuild, args.mes)
+        filas, ok = _process_file(con, None, None, path, args.rebuild,
+                                  args.mes, args.force)
         total += filas
         if ok:
             _archivar(path, PROCESADO_DIR)

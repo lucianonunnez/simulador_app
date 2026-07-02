@@ -44,7 +44,8 @@ def _interactive() -> int:
         return 1
     name = input("Nombre completo: ").strip()
     email = input("Email (opcional): ").strip()
-    role = (input("Rol [admin/user] (default user): ").strip() or "user").lower()
+    # Sin prompt de "Rol": el campo se eliminó de la app (no autorizaba nada,
+    # daba una falsa sensación de control de acceso — ver auth.get_current_user).
 
     pw = getpass.getpass("Password: ")
     pw2 = getpass.getpass("Repetir password: ")
@@ -65,7 +66,6 @@ def _interactive() -> int:
     if email:
         print(f'email = "{email}"')
     print(f'password = "{hashed}"')
-    print(f'role = "{role}"')
     print()
     print("# Si el archivo todavía no tiene cookie_key, agregá al inicio:")
     print(f'# cookie_key = "{gen_cookie_key()}"')

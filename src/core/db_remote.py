@@ -50,6 +50,19 @@ DEFAULT_SCHEMA = "simulador"
 # ============================================================================
 # CONFIGURACIÓN
 # ============================================================================
+def _forzar_sslmode(dsn: str) -> str:
+    """
+    Garantiza TLS hacia Supabase: sin `sslmode`, libpq negocia con `prefer` y
+    puede caer a texto plano (credenciales y datos de salud sin cifrar). Se
+    agrega `sslmode=require` salvo que el DSN ya traiga uno explícito (un modo
+    más estricto como verify-full del usuario se respeta).
+    """
+    if "sslmode=" in dsn:
+        return dsn
+    sep = "&" if "?" in dsn else "?"
+    return f"{dsn}{sep}sslmode=require"
+
+
 def _read_secrets() -> Optional[dict]:
     """
     Lee la config de Supabase de los secrets o del entorno. None si no hay.
@@ -61,7 +74,7 @@ def _read_secrets() -> Optional[dict]:
     url_env = os.environ.get("SUPABASE_DATABASE_URL")
     if url_env:
         return {
-            "database_url": url_env,
+            "database_url": _forzar_sslmode(url_env),
             "schema": os.environ.get("SUPABASE_SCHEMA", DEFAULT_SCHEMA),
         }
 
@@ -76,18 +89,20 @@ def _read_secrets() -> Optional[dict]:
         return None
 
     if not cfg.get("database_url"):
-        # Permitir también campos sueltos -> armar el DSN.
+        # Permitir también campos sueltos -> armar el DSN (siempre con TLS:
+        # acá no hay forma de que el usuario haya pedido otro sslmode).
         campos = ("user", "password", "host")
         if all(cfg.get(k) for k in campos):
             port = cfg.get("port", 5432)
             dbname = cfg.get("dbname", "postgres")
             cfg["database_url"] = (
                 f"postgresql://{cfg['user']}:{cfg['password']}"
-                f"@{cfg['host']}:{port}/{dbname}"
+                f"@{cfg['host']}:{port}/{dbname}?sslmode=require"
             )
         else:
             return None
 
+    cfg["database_url"] = _forzar_sslmode(cfg["database_url"])
     cfg.setdefault("schema", DEFAULT_SCHEMA)
     return cfg
 

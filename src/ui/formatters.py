@@ -51,6 +51,16 @@ def format_int(value: float) -> str:
     return _es_ar(float(value), decimals=0)
 
 
+def format_pct(value: float | None, decimals: int = 2) -> str:
+    """Porcentaje es-AR: 12,50% (coma decimal). None/NaN -> '—'.
+
+    Unifica los porcentajes de la UI, que se mostraban en formato US con punto
+    ('12.50%') al lado de montos es-AR ('$1.234.567,89')."""
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{_es_ar(float(value), decimals=decimals)}%"
+
+
 def safe_pct(num: float, den: float) -> float | None:
     """
     num / den * 100, o None si el denominador es 0/NaN.

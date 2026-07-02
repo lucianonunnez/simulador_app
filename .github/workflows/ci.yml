@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# Least-privilege: al workflow le alcanza con leer el repo (checkout). Sin
+# esto el GITHUB_TOKEN hereda los permisos amplios por default.
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest

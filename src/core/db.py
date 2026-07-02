@@ -36,6 +36,10 @@ INGEST_LOG_TABLE = "_ingest_log"
 # Grano del upsert. Como los datos se bajan "de a partes" por prestador (por el
 # límite de ~1M filas de MicroStrategy), el reemplazo es por (Prestador, Mes):
 # re-subir un prestador/mes pisa solo esas filas, sin tocar los demás.
+# OJO: dentro de cada par el reemplazo es POR DISEÑO destructivo — un re-export
+# PARCIAL de un (Prestador, Mes) elimina el resto de las filas de ese par. La
+# ingesta (scripts/ingest.py) avisa con un ATENCIÓN cuando el archivo nuevo
+# trae bastante menos filas (< 50%) que las que borra.
 CONSUMO_KEY = ("Prestador ID", "Mes")
 VALORES_KEY = ("Prestador ID", "Mes Vigencia")
 

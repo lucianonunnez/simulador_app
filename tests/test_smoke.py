@@ -367,6 +367,57 @@ def test_ratelimit_bloquea_tras_max_intentos():
     ratelimit.reset()
 
 
+def test_ratelimit_umbral_por_ip_mas_alto():
+    """Nueva semántica del lockout: buckets separados por username intentado
+    ("user:...") y por IP ("ip:..."). El de IP usa un umbral más alto: frena
+    ataques distribuidos entre usernames sin que 5 fallos ajenos alcancen
+    para bloquear (DoS) la cuenta de un usuario legítimo."""
+    ratelimit.reset()
+    t0 = 2_000_000.0
+
+    # Un atacante prueba 5 usernames DISTINTOS desde la misma IP: ningún
+    # bucket de usuario se bloquea, y la IP todavía no llega a su umbral.
+    for i in range(ratelimit.MAX_INTENTOS):
+        ratelimit.registrar_fallo(f"user:victima{i}", ahora=t0 + i)
+        ratelimit.registrar_fallo("ip:10.0.0.1", ahora=t0 + i)
+    assert ratelimit.segundos_bloqueado("user:victima0", ahora=t0 + 6) == 0
+    assert ratelimit.segundos_bloqueado(
+        "ip:10.0.0.1", ahora=t0 + 6, max_intentos=ratelimit.MAX_INTENTOS_IP
+    ) == 0
+
+    # Al llegar a MAX_INTENTOS_IP, la IP queda bloqueada aunque cada username
+    # individual siga con pocos fallos.
+    for i in range(ratelimit.MAX_INTENTOS, ratelimit.MAX_INTENTOS_IP):
+        ratelimit.registrar_fallo("ip:10.0.0.1", ahora=t0 + i)
+    assert ratelimit.segundos_bloqueado(
+        "ip:10.0.0.1", ahora=t0 + 20, max_intentos=ratelimit.MAX_INTENTOS_IP
+    ) > 0
+    # Otra IP no se ve afectada.
+    assert ratelimit.segundos_bloqueado(
+        "ip:10.0.0.2", ahora=t0 + 20, max_intentos=ratelimit.MAX_INTENTOS_IP
+    ) == 0
+    ratelimit.reset()
+
+
+def test_ratelimit_username_intentado_bloquea_aunque_cambie_la_sesion():
+    """Regresión de la evasión: la clave es el username INTENTADO (estado del
+    proceso, no de la sesión), así que abrir una sesión nueva por intento no
+    resetea el conteo. Además el umbral default (por usuario) es más bajo que
+    el de IP: los mismos 5 fallos bloquean al username pero no a la IP."""
+    ratelimit.reset()
+    t0 = 3_000_000.0
+    # Cada fallo simula venir de una "sesión"/IP distinta: mismo bucket igual.
+    for i in range(ratelimit.MAX_INTENTOS):
+        ratelimit.registrar_fallo("user:pepe", ahora=t0 + i)
+        ratelimit.registrar_fallo(f"ip:10.0.0.{i}", ahora=t0 + i)
+    assert ratelimit.segundos_bloqueado("user:pepe", ahora=t0 + 6) > 0
+    # El mismo conteo NO alcanza el umbral por IP (parametrizable).
+    assert ratelimit.segundos_bloqueado(
+        "user:pepe", ahora=t0 + 6, max_intentos=ratelimit.MAX_INTENTOS_IP
+    ) == 0
+    ratelimit.reset()
+
+
 # ----------------------------------------------------------------------------
 # ui.formatters (localización es-AR: miles con '.', decimales con ',')
 # ----------------------------------------------------------------------------
@@ -396,10 +447,31 @@ def test_df_fingerprint_distingue_contenido():
     assert df_fingerprint(a) != df_fingerprint(a.head(1))    # largo distinto
 
 
+def test_df_fingerprint_distingue_cambio_solo_texto():
+    """Regresión del bug de colisión: un tarifario corregido donde SOLO cambió
+    texto (Nomenclador, flag Pauta/No pauta), con las mismas filas y sumas
+    numéricas, debe producir OTRA clave de caché — si no, la app sirve
+    resultados financieros viejos con confianza."""
+    a = pd.DataFrame({"x": [1, 2], "y": ["Laboratorio", "Consultas"]})
+    b = pd.DataFrame({"x": [1, 2], "y": ["Laboratorio", "Cirugía"]})
+    c = pd.DataFrame({"x": [2, 1], "y": ["Consultas", "Laboratorio"]})
+    assert df_fingerprint(a) != df_fingerprint(b)   # cambio solo-texto
+    assert df_fingerprint(a) == df_fingerprint(c)   # mismas filas, otro orden
+
+
 def test_format_int_es_ar():
     from ui.formatters import format_int
     assert format_int(644_984) == "644.984"
     assert format_int(0) == "0"
+
+
+def test_format_pct_es_ar():
+    from ui.formatters import format_pct
+    assert format_pct(12.5) == "12,50%"          # coma decimal es-AR
+    assert format_pct(-40) == "-40,00%"
+    assert format_pct(3.14159, decimals=1) == "3,1%"
+    assert format_pct(None) == "—"               # None/NaN -> guion, no 'nan%'
+    assert format_pct(float("nan")) == "—"
 
 
 def test_safe_pct_evita_inf_y_nan():

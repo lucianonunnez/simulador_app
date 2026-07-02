@@ -134,7 +134,8 @@ avisa en lugar de fallar.
 ## Stack
 
 Streamlit 1.38 · pandas ≥2.2 / NumPy · Plotly · DuckDB · psycopg2 (Supabase) ·
-scikit-learn 1.6.1 · LightGBM · TensorFlow/Keras (`tensorflow-cpu <2.17`) ·
+scikit-learn 1.6.1 · LightGBM · TensorFlow/Keras **opcional** (`requirements-nn.txt`,
+solo para la comparativa con la red neuronal del Módulo 3) ·
 streamlit-authenticator + bcrypt · openpyxl · requests (API INDEC).
 
 ## Desarrollo y calidad

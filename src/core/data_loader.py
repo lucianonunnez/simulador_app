@@ -44,6 +44,7 @@ from core.excel_utils import (
     load_excel_smart,
     missing_columns,
 )
+from ui.formatters import format_int
 
 
 def _as_tuple(x: Optional[Iterable]) -> Optional[tuple]:
@@ -86,7 +87,7 @@ def _get_ro_connection():
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _query_table(
+def _query_table_cached(
     table: str,
     mes_col: str,
     prestador_ids: Optional[tuple],
@@ -100,6 +101,9 @@ def _query_table(
     de arriba muestre el fallback de upload manual). Cacheado 10 min, con
     invalidación automática al reingerir (db_state = fingerprint de la base).
 
+    Los errores PROPAGAN (ver NOTA sobre concurrencia más abajo): el manejo
+    está en el wrapper _query_table, fuera del caché.
+
     Si hay Supabase configurado, la consulta va a la base remota (mismo
     contrato de columnas y mismo push-down de filtros).
     """
@@ -108,30 +112,49 @@ def _query_table(
     if not DB_PATH.exists():
         return None
 
+    con = _get_ro_connection().cursor()  # cursor propio: thread-safe
+    if not table_exists(con, table):
+        return None
+
+    sql = f'SELECT * FROM "{table}"'
+    clauses: list[str] = []
+    params: list = []
+
+    if prestador_ids:
+        placeholders = ",".join(["?"] * len(prestador_ids))
+        clauses.append(f'"Prestador ID" IN ({placeholders})')
+        params.extend(prestador_ids)
+
+    if meses:
+        placeholders = ",".join(["?"] * len(meses))
+        clauses.append(f'"{mes_col}" IN ({placeholders})')
+        params.extend(meses)
+
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+
+    df = con.execute(sql, params).fetch_df()
+    return df if len(df) else None
+
+
+def _query_table(
+    table: str,
+    mes_col: str,
+    prestador_ids: Optional[tuple],
+    meses: Optional[tuple],
+    db_state: str = "",
+) -> Optional[pd.DataFrame]:
+    """
+    Wrapper NO cacheado de _query_table_cached: maneja el error del rerun.
+
+    Antes el try/except vivía DENTRO de la función cacheada y devolvía None:
+    st.cache_data cacheaba ese None (y el st.error solo se veía en el primer
+    rerun) → un lock transitorio de ingesta dejaba la app "sin datos" y sin
+    mensaje hasta 10 minutos. Con el error fuera del caché, el fallo afecta
+    solo a este rerun y el mensaje se muestra siempre.
+    """
     try:
-        con = _get_ro_connection().cursor()  # cursor propio: thread-safe
-        if not table_exists(con, table):
-            return None
-
-        sql = f'SELECT * FROM "{table}"'
-        clauses: list[str] = []
-        params: list = []
-
-        if prestador_ids:
-            placeholders = ",".join(["?"] * len(prestador_ids))
-            clauses.append(f'"Prestador ID" IN ({placeholders})')
-            params.extend(prestador_ids)
-
-        if meses:
-            placeholders = ",".join(["?"] * len(meses))
-            clauses.append(f'"{mes_col}" IN ({placeholders})')
-            params.extend(meses)
-
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
-
-        df = con.execute(sql, params).fetch_df()
-        return df if len(df) else None
+        return _query_table_cached(table, mes_col, prestador_ids, meses, db_state)
     except Exception as e:
         # Detalle técnico al log; mensaje entendible al usuario (sin internals).
         logger.exception("Error consultando la tabla '%s' en la base local", table)
@@ -390,7 +413,7 @@ def _leer_subido(uploaded_file, expected_cols: set, numeric_cols: set, label: st
         miss = missing_columns(df, expected_cols)
         if miss:
             st.warning(f"{label} (subido): faltan columnas {sorted(miss)}")
-        st.success(f"{label} subido: {len(df):,} filas")
+        st.success(f"{label} subido: {format_int(len(df))} filas")
         return df
     except Exception:
         logger.exception("Error leyendo el archivo subido de %s", label)
@@ -449,9 +472,9 @@ def load_consumo_and_valores(
 
     with st.sidebar.expander("Carga de datos", expanded=not base_ok):
         if base_consumo is not None:
-            st.success(f"Base · Consumo: {len(base_consumo):,} filas")
+            st.success(f"Base · Consumo: {format_int(len(base_consumo))} filas")
         if base_valores is not None:
-            st.success(f"Base · Valores: {len(base_valores):,} filas")
+            st.success(f"Base · Valores: {format_int(len(base_valores))} filas")
 
         if st.button(
             "Recargar datos",

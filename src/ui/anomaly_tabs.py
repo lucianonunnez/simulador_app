@@ -20,7 +20,14 @@ from core.anomaly import (
     detect_structural_anomalies,
     detect_temporal_anomalies,
 )
-from ui.formatters import format_currency, format_currency_full, format_quantity, safe_pct
+from ui.formatters import (
+    format_currency,
+    format_currency_full,
+    format_int,
+    format_pct,
+    format_quantity,
+    safe_pct,
+)
 from ui.insights import insight_anomalias
 
 
@@ -464,9 +471,9 @@ def _render_structural_section(df: pd.DataFrame, config: dict) -> None:
     total = len(df_struct)
     anom  = int(df_struct["is_anomaly_structural"].sum())
     c1, c2, c3 = st.columns(3)
-    c1.metric("Registros evaluados", f"{total:,}")
-    c2.metric("Marcados estructuralmente", f"{anom:,}")
-    c3.metric("% anómalos", f"{(anom/total*100) if total > 0 else 0:.1f}%")
+    c1.metric("Registros evaluados", format_int(total))
+    c2.metric("Marcados estructuralmente", format_int(anom))
+    c3.metric("% anómalos", format_pct((anom / total * 100) if total > 0 else 0, 1))
 
     if anom == 0:
         st.info("Sin desvíos estructurales encontrados")

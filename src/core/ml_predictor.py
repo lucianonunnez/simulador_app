@@ -24,9 +24,9 @@ import streamlit as st
 
 from core.cachekeys import df_fingerprint
 
-# Imports lazy para que la app no falle si TF no está instalado
-_tf = None
-_lgb = None
+# Los imports de lightgbm/tensorflow son lazy (adentro de load_*) para que la
+# app no falle ni gaste RAM si no se usan. tensorflow es además OPCIONAL:
+# sin él, el módulo funciona en modo LightGBM-only (ver requirements-nn.txt).
 
 
 # ============================================================================
@@ -66,27 +66,51 @@ def load_lightgbm(metric: Literal["importe", "precio", "cantidad"]):
     """Carga un modelo LightGBM entrenado."""
     import lightgbm as lgb
     path = MODELS_DIR / f"lightgbm_{metric}.txt"
-    if not path.exists():
-        raise FileNotFoundError(f"No se encontró {path}. ¿Subiste los modelos al repo?")
-    return lgb.Booster(model_file=str(path))
+    if not _is_usable_model_file(path):
+        raise FileNotFoundError(
+            f"No se encontró {path} (o es un puntero Git LFS sin resolver). "
+            "¿Subiste los modelos al repo? / corré `git lfs pull`."
+        )
+    try:
+        return lgb.Booster(model_file=str(path))
+    except Exception as e:
+        raise RuntimeError(
+            f"El archivo {path} parece corrupto y no se pudo cargar ({e}). "
+            "Re-subí el modelo entrenado desde el notebook de Colab."
+        ) from e
 
 
 @st.cache_resource(show_spinner="Cargando red neuronal...")
 def load_pablo(metric: Literal["importe", "precio", "cantidad"]):
     """Carga modelo Pablo corregido + sus scalers."""
-    from tensorflow.keras.models import load_model
+    try:
+        from tensorflow.keras.models import load_model
+    except ImportError as e:
+        raise RuntimeError(
+            "tensorflow no está instalado: es OPCIONAL y solo hace falta para "
+            "la comparativa con la red neuronal. Instalalo con "
+            "`pip install -r requirements-nn.txt`."
+        ) from e
 
     path_model = MODELS_DIR / f"pablo_corregido_{metric}.keras"
     path_scalers = MODELS_DIR / "scalers_pablo.pkl"
 
-    if not path_model.exists():
-        raise FileNotFoundError(f"No se encontró {path_model}")
-    if not path_scalers.exists():
-        raise FileNotFoundError(f"No se encontró {path_scalers}")
+    for p in (path_model, path_scalers):
+        if not _is_usable_model_file(p):
+            raise FileNotFoundError(
+                f"No se encontró {p} (o es un puntero Git LFS sin resolver: "
+                "corré `git lfs pull`)."
+            )
 
-    model = load_model(path_model, compile=False)
-    with open(path_scalers, "rb") as f:
-        scalers_all = pickle.load(f)
+    try:
+        model = load_model(path_model, compile=False)
+        with open(path_scalers, "rb") as f:
+            scalers_all = pickle.load(f)
+    except Exception as e:
+        raise RuntimeError(
+            f"No se pudo cargar la red neuronal ({e}). El .keras o el "
+            "scalers_pablo.pkl parecen corruptos: re-subilos desde Colab."
+        ) from e
     scalers = scalers_all.get(metric)
     if scalers is None:
         raise ValueError(f"Scalers para métrica '{metric}' no encontrados en pkl")
@@ -126,7 +150,10 @@ def construir_panel(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     """Construye panel Prestador × Prestación × Mes con calendario completo."""
     from core.excel_utils import normalize_month_series
 
-    df = df_consumo.copy()
+    # Solo las columnas que el panel usa: copiar el dataset completo duplicaba
+    # en RAM descripciones/categóricas que acá no se tocan.
+    df = df_consumo[["Mes", "Prestador ID", "Prestacion ID",
+                     "Cantidad CM", "Importe CM"]].copy()
     # Parser único de meses de la app: tolera 'MM-YYYY', nombres en español
     # ('Mayo 2026') y datetimes. Antes el formato hardcodeado descartaba en
     # silencio TODO el dataset si el mes venía en otro formato.
@@ -155,19 +182,23 @@ def construir_panel(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
             .reset_index(name="valor")
         )
 
+    # El consumo crudo ya no se usa: liberarlo antes de densificar el panel
+    del df
+
     # Rellenar calendario completo
     meses_todos = pd.date_range(start=agg["mes_dt"].min(), end=agg["mes_dt"].max(), freq="MS")
     entidades = agg[["Prestador ID", "Prestacion ID"]].drop_duplicates()
-    grid = (
-        entidades.assign(key=1)
-        .merge(pd.DataFrame({"mes_dt": meses_todos, "key": 1}), on="key")
-        .drop(columns="key")
-    )
+    # how="cross" arma el producto cartesiano sin la columna 'key' auxiliar
+    # (misma salida, una copia intermedia menos).
+    grid = entidades.merge(pd.DataFrame({"mes_dt": meses_todos}), how="cross")
     panel = grid.merge(agg, on=["Prestador ID", "Prestacion ID", "mes_dt"], how="left")
-    panel["fue_activo"] = panel["valor"].notna().astype(int)
+    del grid, agg  # liberar intermedios antes del sort (que copia el panel)
+    # int8 alcanza para el flag 0/1 (mismos valores exactos para el modelo)
+    panel["fue_activo"] = panel["valor"].notna().astype("int8")
     panel["valor"] = panel["valor"].fillna(0)
 
-    return panel.sort_values(["Prestador ID", "Prestacion ID", "mes_dt"]).reset_index(drop=True)
+    # ignore_index=True evita la copia extra de reset_index sobre el panel denso
+    return panel.sort_values(["Prestador ID", "Prestacion ID", "mes_dt"], ignore_index=True)
 
 
 def agregar_features(panel: pd.DataFrame) -> pd.DataFrame:
@@ -177,7 +208,10 @@ def agregar_features(panel: pd.DataFrame) -> pd.DataFrame:
 
     for lag in LAGS:
         df[f"lag_{lag}"] = g["valor"].shift(lag)
-        df[f"activo_lag_{lag}"] = g["fue_activo"].shift(lag)
+        # Flags 0/1/NaN: float32 los representa exacto y pesa la mitad.
+        # OJO: lag_* y rolling_* quedan en float64 a propósito — son importes
+        # grandes y bajarlos a float32 podría mover predicciones de LightGBM.
+        df[f"activo_lag_{lag}"] = g["fue_activo"].shift(lag).astype("float32")
 
     for v in VENTANAS_MOV:
         df[f"rolling_mean_{v}"] = g["valor"].transform(
@@ -187,8 +221,9 @@ def agregar_features(panel: pd.DataFrame) -> pd.DataFrame:
             lambda s: s.shift(1).rolling(v, min_periods=2).std()
         )
 
-    df["mes_num"] = df["mes_dt"].dt.month
-    df["trimestre"] = df["mes_dt"].dt.quarter
+    # Enteros chicos exactos (1-12 / 1-4): int8 en vez de int32/64
+    df["mes_num"] = df["mes_dt"].dt.month.astype("int8")
+    df["trimestre"] = df["mes_dt"].dt.quarter.astype("int8")
     return df
 
 
@@ -202,6 +237,10 @@ def enriquecer_con_categoricas(df_features: pd.DataFrame, df_consumo: pd.DataFra
         .agg(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else None)
         .reset_index()
     )
+    # category ANTES del merge: en el panel denso cada valor se repite miles de
+    # veces; como códigos ocupa ~1 byte por fila en vez de un puntero a string.
+    for c in cats:
+        modas[c] = modas[c].astype("category")
     return df_features.merge(modas, on=["Prestador ID", "Prestacion ID"], how="left")
 
 
@@ -217,6 +256,7 @@ def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     """
     panel = construir_panel(df_consumo, metric)
     df_feat = agregar_features(panel)
+    del panel  # agregar_features trabaja sobre una copia; liberar la base
     return enriquecer_con_categoricas(df_feat, df_consumo)
 
 
@@ -272,7 +312,14 @@ def predecir_lightgbm(
     # pd.Categorical(values, categories=cats_entrenamiento).
     for c in cats:
         if c in df_feat.columns:
-            df_feat[c] = df_feat[c].astype("category")
+            if isinstance(df_feat[c].dtype, pd.CategoricalDtype):
+                # Ya viene como category desde construir_features: descartar
+                # las categorías que el filtro/dropna dejó sin filas reproduce
+                # EXACTAMENTE los códigos que astype("category") derivaba de
+                # los valores presentes (mismos números que antes).
+                df_feat[c] = df_feat[c].cat.remove_unused_categories()
+            else:
+                df_feat[c] = df_feat[c].astype("category")
 
     # Alinear columnas: features esperadas
     X = df_feat[[c for c in features if c in df_feat.columns]].copy()
@@ -364,6 +411,52 @@ def get_feature_importance(metric: str, top_n: int = 15) -> pd.DataFrame:
 # ============================================================================
 # UTILIDADES
 # ============================================================================
+def tensorflow_disponible() -> bool:
+    """
+    True si tensorflow está instalado, SIN importarlo (importar TF cuesta
+    cientos de MB de RAM; acá solo miramos si el paquete existe en el entorno).
+    """
+    from importlib.util import find_spec
+    try:
+        return find_spec("tensorflow") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def estado_modelos() -> dict:
+    """
+    Resume la disponibilidad por familia de modelos para el gate del Módulo 3:
+
+    - "lightgbm_ok": los 3 LightGBM usables → el módulo puede funcionar
+      (modo LightGBM-only, es el mínimo requerido).
+    - "nn_ok": además están las 3 redes Keras + scalers usables Y tensorflow
+      importable → se habilita la comparativa con la red neuronal.
+    - "nn_motivo": por qué NO está la red (para avisar sin cortar el módulo).
+    - "detalle": el dict crudo de modelos_disponibles().
+    """
+    status = modelos_disponibles()
+    lgb_ok = all(status[f"lightgbm_{m}"] for m in METRICS)
+
+    faltan_nn = [f"pablo_corregido_{m}" for m in METRICS if not status[f"pablo_corregido_{m}"]]
+    if not status["scalers_pablo"]:
+        faltan_nn.append("scalers_pablo")
+
+    if faltan_nn:
+        nn_ok, nn_motivo = False, (
+            f"faltan archivos usables (`{', '.join(faltan_nn)}`) — si están "
+            "versionados con Git LFS, corré `git lfs pull`"
+        )
+    elif not tensorflow_disponible():
+        nn_ok, nn_motivo = False, (
+            "tensorflow no está instalado — es opcional, se habilita con "
+            "`pip install -r requirements-nn.txt`"
+        )
+    else:
+        nn_ok, nn_motivo = True, None
+
+    return {"lightgbm_ok": lgb_ok, "nn_ok": nn_ok, "nn_motivo": nn_motivo, "detalle": status}
+
+
 def modelos_disponibles() -> dict[str, bool]:
     """Chequea qué modelos están presentes en disco."""
     status = {}

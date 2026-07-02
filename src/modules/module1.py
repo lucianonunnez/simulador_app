@@ -5,6 +5,8 @@ v0.5.2 — diseño Swiss Medical
 
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -16,7 +18,7 @@ from core.data_loader import (
     source_uses_uploads,
 )
 from core.simulator import apply_simulation, impact_metrics, merge_coverage
-from ui.formatters import format_currency, format_currency_full, format_int
+from ui.formatters import format_currency, format_currency_full, format_int, format_pct
 from ui.simulator_controls import render_simulator_controls
 from ui.simulator_tabs import render_tabs
 
@@ -100,9 +102,9 @@ def _render_cobertura_y_tarifario(df_consumo: pd.DataFrame, df_merged: pd.DataFr
         if dt.notna().any():
             vigencia = dt.max().strftime("%m-%Y")
 
-    partes = [f"Cobertura del tarifario: **{cob['filas'] * 100:.1f}%** de las filas"]
+    partes = [f"Cobertura del tarifario: **{format_pct(cob['filas'] * 100, 1)}** de las filas"]
     if cob["importe"] is not None:
-        partes.append(f"**{cob['importe'] * 100:.1f}%** del importe")
+        partes.append(f"**{format_pct(cob['importe'] * 100, 1)}** del importe")
     if vigencia:
         partes.append(f"Tarifario al **{vigencia}**")
     st.caption(" · ".join(partes))
@@ -117,6 +119,10 @@ def _render_cobertura_y_tarifario(df_consumo: pd.DataFrame, df_merged: pd.DataFr
 
 def _metric_card(label: str, value: str, delta: str = "", delta_color: str = "#E4002B", icon: str = "") -> None:
     """Renderiza una card de métrica estilo Swiss Medical."""
+    # html.escape: la card interpola sus argumentos en HTML. Hoy llegan
+    # formateados (montos y labels fijos), pero se escapan igual para que un
+    # caller futuro con texto derivado de datos no habilite XSS.
+    label, value, delta = html.escape(label), html.escape(value), html.escape(delta)
     delta_html = ""
     if delta:
         delta_html = f'<div style="margin-top:6px; font-size:13px; font-weight:500; color:{delta_color};">{delta}</div>'
@@ -147,7 +153,7 @@ def _render_metrics(total_ideal: float, total_sim: float, dif: float, pct: float
     fmt_sim   = format_currency(total_sim)
     fmt_dif   = format_currency(dif)
     fmt_pct   = f"{pct:+.2f}%"
-    fmt_imp   = f"{pct:.2f}%"
+    fmt_imp   = format_pct(pct)
 
     if pct > 0:
         delta_color, delta_icon = "#E4002B", "▲"
@@ -323,7 +329,7 @@ def render() -> None:
         df_neg_display = df_neg.copy()
         df_neg_display["Valor Convenido a HOY"] = df_neg_display["Valor Convenido a HOY"].apply(format_currency_full)
         df_neg_display["Valor Ofrecido"]        = df_neg_display["Valor Ofrecido"].apply(format_currency_full)
-        df_neg_display["% Aumento"]             = df_neg_display["% Aumento"].apply(lambda x: f"{x:.2f}%")
+        df_neg_display["% Aumento"]             = df_neg_display["% Aumento"].apply(format_pct)
 
         st.dataframe(df_neg_display, use_container_width=True, hide_index=True)
         csv = df_neg.to_csv(index=False).encode("utf-8")
@@ -354,24 +360,24 @@ def _render_negociacion(
     st.markdown("##### Métricas de negociación")
     notas = [f"Impacto mensual = total / {n_meses_num} mes(es)"]
     if config["pauta_pct"] is not None:
-        notas.append(f"Pauta de referencia: **{config['pauta_pct']:.2f}%**")
+        notas.append(f"Pauta de referencia: **{format_pct(config['pauta_pct'])}**")
     st.caption(" · ".join(notas))
 
     rows = []
-    escenarios = [(f"Solicitado (general {config['flat_pct']:.1f}%)", metrics_sol)]
+    escenarios = [(f"Solicitado (general {format_pct(config['flat_pct'], 1)})", metrics_sol)]
     if metrics_prop is not None:
         escenarios.append(
-            (f"Propuesto ({config['flat_pct_propuesto']:.1f}%)", metrics_prop)
+            (f"Propuesto ({format_pct(config['flat_pct_propuesto'], 1)})", metrics_prop)
         )
     for nombre, m in escenarios:
         row = {
             "Escenario": nombre,
-            "Impacto %": f"{m['impacto_pct'] * 100:.2f}%",
+            "Impacto %": format_pct(m["impacto_pct"] * 100),
             "Impacto total": format_currency_full(m["impacto"]),
             "Impacto mensual": format_currency_full(m["impacto_mensual"]),
         }
         if "extrapauta" in m:
-            row["Extrapauta %"] = f"{m['extrapauta_pct'] * 100:.2f}%"
+            row["Extrapauta %"] = format_pct(m["extrapauta_pct"] * 100)
             row["Extrapauta total"] = format_currency_full(m["extrapauta"])
             row["Extrapauta mensual"] = format_currency_full(m["extrapauta_mensual"])
         rows.append(row)

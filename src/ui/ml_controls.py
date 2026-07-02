@@ -9,21 +9,25 @@ from __future__ import annotations
 import streamlit as st
 
 
-def render_ml_controls(prestadores_disponibles: list = None) -> dict:
+def render_ml_controls(prestadores_disponibles: list = None,
+                       nn_disponible: bool = True) -> dict:
     """
     Renderiza los controles del sidebar y devuelve un dict con la configuración.
 
     Args:
         prestadores_disponibles: lista de tuplas (id, desc) para el selector
+        nn_disponible: si la red neuronal está disponible (archivos + tensorflow);
+            si no, el checkbox queda deshabilitado y el módulo corre LightGBM-only
 
     Returns:
         {
             "metric": "importe" | "precio" | "cantidad",
             "models": list[str],        # ["lightgbm", "pablo_corregido"]
+            "nn_disponible": bool,
             "filtro_prestador": int | None,
         }
     """
-    config = {}
+    config = {"nn_disponible": nn_disponible}
 
     with st.sidebar.expander("Configuración de Predicción", expanded=True):
 
@@ -50,13 +54,17 @@ def render_ml_controls(prestadores_disponibles: list = None) -> dict:
         st.caption("**Modelos a aplicar**")
         usar_lgb = st.checkbox("LightGBM (recomendado)", value=True,
                                 help="Gradient boosting. Más preciso para tabular.")
-        usar_pablo = st.checkbox("Red Neuronal", value=True,
-                                  help="Red neuronal feed-forward, corregida sin data leakage.")
+        usar_pablo = st.checkbox("Red Neuronal", value=nn_disponible,
+                                  disabled=not nn_disponible,
+                                  help=("Red neuronal feed-forward, corregida sin data leakage."
+                                        if nn_disponible else
+                                        "No disponible en esta instalación (faltan archivos "
+                                        "del modelo o tensorflow). Ver aviso arriba."))
 
         config["models"] = []
         if usar_lgb:
             config["models"].append("lightgbm")
-        if usar_pablo:
+        if usar_pablo and nn_disponible:
             config["models"].append("pablo_corregido")
 
         if not config["models"]:
