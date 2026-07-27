@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 from core.cachekeys import df_fingerprint
 from ui.insights import insight_concentracion, insight_evolucion
 from core.indec import fetch_inflation
+from core.seguimiento import (
+    MESES_ES_FULL,
+    acumulado_compuesto,
+    meses_del_anio,
+    serie_valor_por_mes,
+    variacion_mensual,
+)
 from core.simulator import aggregate_top_n
 from ui.formatters import (
     format_currency,
@@ -63,9 +70,11 @@ def render_tabs(
     df_simulated: pd.DataFrame,
     df_consumo_raw: pd.DataFrame,
     prestador_id: int | None,
+    df_valores_raw: pd.DataFrame | None = None,
 ) -> None:
     tabs = st.tabs([
         "Evolución",
+        "Seguimiento",
         "Nomenclador",
         "Top Prestaciones",
         "Megacuenta",
@@ -75,12 +84,13 @@ def render_tabs(
     ])
 
     with tabs[0]: _tab_evolution(df_consumo_raw, df_simulated)
-    with tabs[1]: _tab_nomenclador(df_simulated)
-    with tabs[2]: _tab_top_prestaciones(df_simulated)
-    with tabs[3]: _tab_megacuenta(df_simulated)
-    with tabs[4]: _tab_comparativa(df_merged, prestador_id)
-    with tabs[5]: _tab_datos(df_simulated)
-    with tabs[6]: _tab_analisis(df_simulated)
+    with tabs[1]: _tab_seguimiento(df_valores_raw, df_merged, prestador_id)
+    with tabs[2]: _tab_nomenclador(df_simulated)
+    with tabs[3]: _tab_top_prestaciones(df_simulated)
+    with tabs[4]: _tab_megacuenta(df_simulated)
+    with tabs[5]: _tab_comparativa(df_merged, prestador_id)
+    with tabs[6]: _tab_datos(df_simulated)
+    with tabs[7]: _tab_analisis(df_simulated)
 
 
 # ----------------------------------------------------------------------------
@@ -275,7 +285,187 @@ def _tab_evolution(df_consumo: pd.DataFrame, df_filtered: pd.DataFrame) -> None:
 
 
 # ----------------------------------------------------------------------------
-# TAB 1: POR NOMENCLADOR
+# TAB 1: SEGUIMIENTO DE PAUTA POR PRESTACIÓN
+# ----------------------------------------------------------------------------
+_HEADER_ROSA = (
+    '<div style="background:#FFF0F3; border-left:3px solid #E4002B;'
+    ' padding:8px 14px; border-radius:6px; margin:10px 0 6px 0;'
+    ' font-weight:600; color:#212529; font-size:13px;">{texto}</div>'
+)
+
+
+def _num(x) -> float | None:
+    """Celda del editor -> float o None (los vacíos vienen como NaN)."""
+    try:
+        if x is None or pd.isna(x):
+            return None
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _tab_seguimiento(
+    df_valores_raw: pd.DataFrame | None,
+    df_merged: pd.DataFrame,
+    prestador_id: int | None,
+) -> None:
+    """
+    Planilla de seguimiento de pauta por prestación (réplica de la que usa el
+    negocio, p. ej. 'Consulta de Guardia' de un prestador): Inflación (INDEC),
+    Pauta otorgada, Valor de la prestación ($) y % Prestación, mes a mes, con
+    acumulado compuesto del año.
+
+    La inflación y el valor de la prestación se PRECARGAN desde los datos; la
+    pauta otorgada se completa a mano (es un dato del negocio, no está en la
+    base). El % de la prestación y el acumulado se calculan solos. Todo es
+    editable para poder cerrar la planilla aunque falte algún dato.
+    """
+    st.subheader("Seguimiento de Pauta por Prestación")
+    st.caption(
+        "Inflación (INDEC), pauta otorgada, valor de la prestación y % aplicado, "
+        "mes a mes, con el acumulado del año — como la planilla de seguimiento."
+    )
+
+    if df_valores_raw is None or len(df_valores_raw) == 0:
+        st.info("No hay tarifario cargado para armar el seguimiento.")
+        return
+    if not {"Prestacion ID", "Mes Vigencia"}.issubset(df_valores_raw.columns):
+        st.info("El tarifario no trae 'Prestación' o 'Mes Vigencia' para el seguimiento.")
+        return
+
+    # La planilla es por prestador (como el mail de HUA): exigimos uno elegido.
+    df_val = df_valores_raw
+    if "Prestador ID" in df_val.columns:
+        if prestador_id is not None:
+            df_val = df_val[df_val["Prestador ID"] == prestador_id]
+        elif df_val["Prestador ID"].nunique() > 1:
+            st.info(
+                "Elegí un prestador en el control de arriba para ver su "
+                "seguimiento por prestación."
+            )
+            return
+    if len(df_val) == 0:
+        st.info("Sin tarifario para el prestador seleccionado.")
+        return
+
+    # ── Selector de prestación ──
+    prests = (
+        df_val[["Prestacion ID", "Prestacion Desc"]]
+        .dropna(subset=["Prestacion ID"])
+        .drop_duplicates()
+    )
+    prests["pid_int"] = pd.to_numeric(prests["Prestacion ID"], errors="coerce").astype("Int64")
+    prests = prests.dropna(subset=["pid_int"]).sort_values("Prestacion Desc")
+    if len(prests) == 0:
+        st.info("El tarifario no trae prestaciones para este prestador.")
+        return
+    prests["label"] = prests["pid_int"].astype(str) + " - " + prests["Prestacion Desc"].astype(str)
+
+    choice = st.selectbox(
+        "Prestación", options=prests["label"].tolist(), key="seg_prest",
+        placeholder="Escribí para buscar la prestación (ej: Consulta de Guardia)...",
+    )
+    if not choice:
+        return
+    pid = int(str(choice).split(" - ")[0])
+    prest_desc = str(prests.loc[prests["pid_int"] == pid, "Prestacion Desc"].iloc[0])
+    df_prest = df_val[pd.to_numeric(df_val["Prestacion ID"], errors="coerce") == pid]
+
+    # ── Selector de año (según las vigencias disponibles) ──
+    from core.excel_utils import normalize_month_series
+
+    vig_dt = pd.to_datetime(
+        normalize_month_series(df_prest["Mes Vigencia"]), format="%m-%Y", errors="coerce"
+    )
+    anios = sorted({int(y) for y in vig_dt.dropna().dt.year.unique()}, reverse=True)
+    if not anios:
+        st.info("La prestación no tiene vigencias con fecha para armar el seguimiento.")
+        return
+    anio = int(st.selectbox("Año", options=anios, index=0, key="seg_anio"))
+
+    meses = meses_del_anio(anio)          # ['01-YYYY', ..., '12-YYYY']
+    labels = list(MESES_ES_FULL)          # Enero..Diciembre
+
+    # Valor por mes + diciembre del año anterior (base del % de enero).
+    valores_ext = serie_valor_por_mes(df_prest, [f"12-{anio - 1}", *meses])
+    base_previa = valores_ext[0]
+    valores_pref = valores_ext[1:]
+
+    # Inflación INDEC por mes (donde haya dato publicado).
+    infl_map: dict[str, float] = {}
+    try:
+        infl = fetch_inflation(months=36)
+        if not infl.empty:
+            t = infl.copy()
+            t["k"] = t["Mes"].dt.strftime("%m-%Y")
+            infl_map = dict(zip(t["k"], t["Inflacion"]))
+    except Exception:
+        logger.exception("No se pudo obtener inflación INDEC para el seguimiento")
+    infl_pref = [round(float(infl_map[m]), 2) if m in infl_map else None for m in meses]
+
+    # ── Grilla editable de entradas ──
+    st.markdown(_HEADER_ROSA.format(texto="Datos de entrada (editables)"), unsafe_allow_html=True)
+    st.caption(
+        "La **inflación** (INDEC) y el **valor de la prestación** se precargan de "
+        "los datos. La **pauta otorgada** se completa a mano (es el dato que da "
+        "el negocio). Podés ajustar cualquier celda: el % de la prestación y el "
+        "acumulado se recalculan solos."
+    )
+    inputs = pd.DataFrame(
+        [infl_pref, [None] * 12, valores_pref],
+        index=["Inflación (%)", "Pauta otorgada (%)", f"Valor {prest_desc} ($)"],
+        columns=labels,
+    ).astype("float64")
+    edited = st.data_editor(inputs, use_container_width=True, key="seg_editor")
+
+    infl_vals = [_num(x) for x in edited.iloc[0].tolist()]
+    pauta_vals = [_num(x) for x in edited.iloc[1].tolist()]
+    valor_vals = [_num(x) for x in edited.iloc[2].tolist()]
+
+    pct_prest = variacion_mensual(valor_vals, base_previa=base_previa)
+
+    # ── Tabla consolidada (como el mail) ──
+    st.markdown(_HEADER_ROSA.format(texto="Seguimiento consolidado"), unsafe_allow_html=True)
+    row_labels = ["Inflación", "Pauta otorgada", f"Valor {prest_desc}", "% Prestación"]
+    row_cells = [
+        [format_pct(v, 1) for v in infl_vals],
+        [format_pct(v, 1) for v in pauta_vals],
+        [format_currency_full(v) if v is not None else "—" for v in valor_vals],
+        [format_pct(v, 1) for v in pct_prest],
+    ]
+    row_acum = [
+        acumulado_compuesto(infl_vals),
+        acumulado_compuesto(pauta_vals),
+        None,
+        acumulado_compuesto(pct_prest),
+    ]
+    tabla = pd.DataFrame(row_cells, index=row_labels, columns=labels)
+    tabla["Acum"] = [format_pct(a, 1) if a is not None else "" for a in row_acum]
+    st.dataframe(tabla, use_container_width=True)
+    st.caption(
+        f"Acumulado compuesto de los % del año. El valor se precarga del mes con "
+        f"vigencia registrada; el % de enero usa el valor de diciembre {anio - 1} "
+        "como base (si existe)."
+    )
+
+    # ── Descarga (valores numéricos, para pegar en la planilla) ──
+    num = pd.DataFrame(
+        [infl_vals, pauta_vals, valor_vals, pct_prest],
+        index=["Inflacion_%", "Pauta_otorgada_%", f"Valor_{prest_desc}_$", "Prestacion_%"],
+        columns=meses,
+    )
+    num["Acum_%"] = [row_acum[0], row_acum[1], None, row_acum[3]]
+    st.download_button(
+        "Descargar seguimiento (CSV)",
+        num.to_csv().encode("utf-8"),
+        f"seguimiento_{pid}_{anio}.csv",
+        "text/csv",
+        key="seg_dl",
+    )
+
+
+# ----------------------------------------------------------------------------
+# TAB 2: POR NOMENCLADOR
 # ----------------------------------------------------------------------------
 # Definiciones de Ideal vs Simulado (se reutilizan en hovers y en la ayuda).
 _HOVER_IDEAL = (

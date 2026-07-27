@@ -25,8 +25,11 @@ nivel paciente). Estado: **operativa en v0.6.0**, uso interno.
    tarifas: escenarios *Solicitado vs Propuesto*, aumentos en capas mixtos
    (%/$ por prestación o nomenclador), Extrapauta, exclusiones "No pauta",
    tarifario fechado con cobertura del merge visible, comparativa por
-   prestador, contexto de inflación (IPC INDEC) y **validador contra workbooks
-   reales de negociación** (reconciliación fila a fila y por headline).
+   prestador, contexto de inflación (IPC INDEC), **seguimiento de pauta por
+   prestación** (planilla mes a mes: inflación · pauta otorgada · valor de la
+   prestación · % aplicado, con acumulado compuesto del año) y **validador
+   contra workbooks reales de negociación** (reconciliación fila a fila y por
+   headline).
 2. **Detección de Desvíos** — Anomalías en costos por prestador, prestación o
    grupo: análisis **temporal** (z-score / IQR con ventana móvil) y
    **estructural** (percentil / z-score contra pares).

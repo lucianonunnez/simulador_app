@@ -342,6 +342,7 @@ def render() -> None:
         df_simulated=df_simulated,
         df_consumo_raw=df_consumo,
         prestador_id=config["prestador_id"],
+        df_valores_raw=df_valores,
     )
 
     st.divider()
