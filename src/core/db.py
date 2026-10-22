@@ -5,7 +5,7 @@ DuckDB es una base analítica embebida: un solo archivo (data/simulador.duckdb)
 en disco, sin servidor ni dependencias externas. Los datos NUNCA salen de la
 máquina -> cumple la restricción de datos médicos sensibles ("todo local").
 
-Por qué DuckDB y no cargar el Excel a RAM (como antes):
+Por qué DuckDB y no cargar los Excel a RAM:
   - Los datos viven en DISCO; a memoria sube solo lo que pide cada consulta.
   - Es columnar y vectorizado: filtrar/agregar es rápido aunque haya millones
     de filas.

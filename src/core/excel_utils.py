@@ -3,8 +3,7 @@ Utilidades puras para leer los Excel de MicroStrategy.
 
 Sin dependencia de Streamlit ni de DuckDB: solo pandas. Esto permite reutilizar
 la MISMA lógica de parseo desde la app (src/core/data_loader.py) y desde el
-script de ingesta (scripts/ingest.py), y es el primer paso para desacoplar
-core/ de Streamlit (Fase 0 de ARQUITECTURA.md).
+script de ingesta (scripts/ingest.py).
 
 Acá viven:
   - Los contratos de columnas esperadas (EXPECTED_*_COLS).
@@ -61,8 +60,8 @@ def detect_header_row(file_content: bytes, expected_cols: set, max_rows: int = 1
     """
     Detecta en qué fila está el encabezado real.
 
-    Reemplaza el bug original (skiprows=3 hardcoded), que rompía cuando el Excel
-    no traía 3 filas de título de Power BI / MicroStrategy.
+    Evita asumir un número fijo de filas de título: los exports de Power BI /
+    MicroStrategy varían según el reporte.
     """
     buf = BytesIO(file_content)
     preview = pd.read_excel(buf, header=None, nrows=max_rows, engine="openpyxl")
@@ -300,7 +299,7 @@ def to_numeric_tolerante(s: pd.Series) -> pd.Series:
     Los exports reales de MicroStrategy traen valores tipo '1,130 ', '23,653 ',
     '8,206.90' (formato US: coma = miles, punto = decimal), '-' como vacío y
     negativos contables entre paréntesis: '(5,477,196)'. Un to_numeric directo
-    los convertía a NaN y se perdían las filas. Acá se limpian antes de coaccionar.
+    los convierte a NaN y se pierden las filas. Acá se limpian antes de coaccionar.
 
     Asume formato US (el de MicroStrategy). No aplicar sobre columnas que
     pudieran venir con coma decimal.

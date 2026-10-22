@@ -9,7 +9,7 @@
 #   4. Si ya dejaste Excel en data\raw\, corre la ingesta a DuckDB.
 #
 # Uso (desde la raiz del repo, en PowerShell):
-#     .\deploy\setup.ps1
+#     .\deploy\lan\setup.ps1
 #
 # Si PowerShell bloquea el script ("execution of scripts is disabled"), corre
 # primero (solo para esta ventana):
@@ -93,5 +93,5 @@ Write-Host "     (pegar el bloque que imprime en .streamlit\secrets.toml)"
 Write-Host "  2. Si falto cargar datos:   $VenvPython scripts\ingest.py"
 Write-Host "  3. Levantar la app:"
 Write-Host "       Demo rapida:  $VenvPython -m streamlit run src\streamlit_app.py"
-Write-Host "       Con TLS:      .\deploy\run_secure.ps1 -Python `"$VenvPython`""
+Write-Host "       Con TLS:      .\deploy\lan\run_secure.ps1 -Python `"$VenvPython`""
 Write-Host ""

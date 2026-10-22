@@ -1,192 +1,160 @@
+# Simulador de Costo Médico
+
+Aplicación web (Streamlit) para analizar y simular el costo médico de
+prestadores a partir de datos agregados de consumo y tarifas (nunca a nivel
+paciente).
+
+| Módulo | Qué resuelve |
+|---|---|
+| **1. Simulador de aumentos** | Impacto financiero de cambios de tarifa: escenarios *Solicitado vs Propuesto*, aumentos por capas (% o $ por prestación / nomenclador), Extrapauta, exclusiones *No pauta*, cobertura del tarifario y validación contra workbooks de negociación. |
+| **2. Detección de desvíos** | Anomalías de costo por prestador, prestación o grupo: análisis temporal (z-score / IQR con ventana móvil) y estructural (percentil / z-score contra pares). |
+| **3. Predicción ML** | Backtest de importe, cantidad y precio con modelos pre-entrenados (LightGBM; red neuronal Keras opcional), comparativa de modelos y métricas. |
+
+**Stack:** Python 3.11 · Streamlit · pandas · DuckDB · PostgreSQL (opcional) ·
+LightGBM · scikit-learn · TensorFlow/Keras (opcional) · Plotly.
+
 ---
-title: Simulador Costo Médico
-emoji: 🏥
-colorFrom: blue
-colorTo: purple
-sdk: docker
-app_port: 8501
-pinned: false
-license: other
+
+## Inicio rápido
+
+El paquete incluye un generador de **datos sintéticos**, así que la app se
+puede levantar completa sin acceso a datos productivos.
+
+### Docker Compose (recomendado)
+
+```bash
+cp .env.example .env          # completar SIMULADOR_PASSWORD
+docker compose up --build
+```
+
+Abrir <http://localhost:8501> e ingresar con `SIMULADOR_USER` (default
+`admin`) y la contraseña definida. En el primer arranque el contenedor genera
+el dataset de demo y lo carga en DuckDB (volumen `simulador-data`).
+
+### Local
+
+```bash
+make install demo-data        # venv + dependencias + datos sintéticos
+SIMULADOR_PASSWORD='...' .venv/bin/python scripts/gen_credentials.py --from-env
+make run
+```
+
+Sin `make`: `python3.11 -m venv .venv`, `pip install -r requirements.txt`,
+`python scripts/generate_demo_data.py --ingest` y
+`streamlit run src/streamlit_app.py` desde la raíz del repo.
+
+### Kubernetes
+
+Manifiestos en [`deploy/k8s/`](deploy/k8s/) (Deployment, Service, PVC y
+ejemplos de Secret e Ingress):
+
+```bash
+docker build -t <registry>/simulador-cm:0.6.0 . && docker push <registry>/simulador-cm:0.6.0
+kubectl create secret generic simulador-credentials \
+  --from-literal=SIMULADOR_USER=admin \
+  --from-literal=SIMULADOR_PASSWORD='...' \
+  --from-literal=SIMULADOR_COOKIE_KEY="$(openssl rand -hex 32)"
+kubectl apply -k deploy/k8s/     # ajustar la imagen en kustomization.yaml
+```
+
+Detalle de configuración, recursos y consideraciones de escalado en
+[`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md).
+
 ---
 
-# 🏥 Simulador de Costo Médico
+## Configuración
 
-[![CI](https://github.com/lucianonunnez/simulador_app/actions/workflows/ci.yml/badge.svg)](https://github.com/lucianonunnez/simulador_app/actions/workflows/ci.yml)
-![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
-![Versión](https://img.shields.io/badge/versión-v0.6.0-informational)
+Toda la configuración de runtime entra por variables de entorno o por
+`.streamlit/secrets.toml` (nunca se versiona ni se incluye en la imagen).
 
-Aplicación interna (Streamlit) para análisis y simulación de costo médico de
-prestadores. Trabaja con datos **agregados por prestador/prestación** (nunca a
-nivel paciente). Estado: **operativa en v0.6.0**, uso interno.
-
-## Módulos
-
-1. **Simulador de Aumentos** — Proyección de impacto financiero por cambios de
-   tarifas: escenarios *Solicitado vs Propuesto*, aumentos en capas mixtos
-   (%/$ por prestación o nomenclador), Extrapauta, exclusiones "No pauta",
-   tarifario fechado con cobertura del merge visible, comparativa por
-   prestador, contexto de inflación (IPC INDEC) y **validador contra workbooks
-   reales de negociación** (reconciliación fila a fila y por headline).
-2. **Detección de Desvíos** — Anomalías en costos por prestador, prestación o
-   grupo: análisis **temporal** (z-score / IQR con ventana móvil) y
-   **estructural** (percentil / z-score contra pares).
-3. **Predicción ML** — Pronóstico de costo con modelos pre-entrenados
-   (LightGBM + red neuronal Keras) para importe, cantidad y precio, con
-   comparativa de modelos y métricas de performance.
-
-## Fuentes de datos
-
-La app resuelve la fuente en runtime, con fallback automático:
-
-| Fuente | Cuándo se usa | Detalle |
+| Variable | Default | Descripción |
 |---|---|---|
-| **Supabase / PostgreSQL** | Si hay bloque `[supabase]` en secrets (o `SUPABASE_DATABASE_URL`) | Fuente de verdad central y multiusuario. Schema `simulador`. Ver [`docs/SUPABASE.md`](docs/SUPABASE.md) |
-| **DuckDB local** | Default sin config de Supabase | `data/simulador.duckdb`, 100% local |
-| **Archivos subidos** | Siempre disponible desde el sidebar («Carga de datos») | xlsx/csv propios, modos *Base / Solo subidos / Combinar* |
+| `SIMULADOR_USER` | `admin` | Usuario de acceso (si no se monta un `secrets.toml`). |
+| `SIMULADOR_PASSWORD` | — | Contraseña del usuario. Obligatoria sin `secrets.toml`. |
+| `SIMULADOR_COOKIE_KEY` | aleatoria | Clave de firma de la cookie de sesión. Fijarla mantiene las sesiones entre reinicios. |
+| `DEMO_DATA` | `false` | `true`: si no hay base, genera el dataset sintético al arrancar. |
+| `SUPABASE_DATABASE_URL` | — | Fuente PostgreSQL en lugar de DuckDB local. Ver [`docs/SUPABASE.md`](docs/SUPABASE.md). |
+| `STREAMLIT_SERVER_BASE_URL_PATH` | — | Servir bajo un subpath (ej. `simulador`). |
+| `PORT` | `8501` | Puerto HTTP del contenedor. |
 
-> La ingesta (`scripts/ingest.py`) hoy escribe **solo a DuckDB local**; la
-> carga hacia Supabase se hace por separado (ver `docs/SUPABASE.md`).
+Para varios usuarios, montar un `secrets.toml` completo (formato en
+[`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example)).
 
-## Ingesta de datos
+---
 
-Los datos se descargan **manualmente** de MicroStrategy (política de IT: sin
-sincronización automática). Detalle de extracción en
-[`FUENTE_DATOS.md`](FUENTE_DATOS.md). Dos rutas:
+## Datos
 
-**a) Bandeja unificada** — dejar los archivos (xlsx **o csv** crudos) en
-`data/a_procesar/` con el período en el nombre (ej. `05-2026-Consumo-1584.xlsx`)
-y usar el botón **«Ingerir y unificar ahora»** dentro de la app, o:
-
-```bash
-python scripts/ingest.py --archivar   # ingiere y archiva a data/procesado/
-```
-
-**b) Carpetas clásicas** — dejar los Excel en `data/raw/consumo/` y
-`data/raw/valores/`, después:
+La app trabaja con dos datasets: **consumo** (cantidad e importe por
+prestador / prestación / mes) y **valores** (tarifario con vigencia). El
+contrato de columnas, el formato de los exports de origen y el proceso de
+ingesta están en [`docs/DATOS.md`](docs/DATOS.md).
 
 ```bash
-python scripts/ingest.py            # ingesta incremental e idempotente
-python scripts/ingest.py --rebuild  # reconstruye la base desde cero
-python scripts/ingest.py --status   # ver qué hay cargado
-python scripts/ingest.py --solo ARCHIVO --mes MM-YYYY  # un archivo puntual
+python scripts/generate_demo_data.py --ingest      # dataset sintético
+python scripts/ingest.py                           # ingesta incremental desde data/raw/
+python scripts/ingest.py --status                  # estado de la base
 ```
 
-La ingesta es idempotente (hash SHA-256 por archivo) con upsert por
-`(Prestador ID, Mes)` y tolera el formato crudo de MicroStrategy (encodings
-raros, columnas `Unnamed:`, números como texto).
+Fuentes soportadas, resueltas en runtime: **DuckDB local**
+(`data/simulador.duckdb`, default), **PostgreSQL / Supabase** (si está
+configurado) y **archivos subidos** desde la propia UI.
 
-## Cómo correrlo
+---
 
-Guía completa paso a paso en [`CÓMO_CORRERLO.md`](CÓMO_CORRERLO.md). Resumen:
+## Modelos
+
+`models/` contiene los modelos pre-entrenados (uno por métrica: importe,
+cantidad, precio) y sus métricas de entrenamiento:
+
+- `lightgbm_*.txt` — modelo principal.
+- `pablo_corregido_*.keras` + `scalers_pablo.pkl` — red neuronal opcional;
+  requiere `pip install -r requirements-nn.txt` (o
+  `docker build --build-arg WITH_NN=true .`).
+
+El feature engineering (lags, medias móviles, estacionalidad) está en
+`src/core/ml_predictor.py` y replica el pipeline de entrenamiento. Ver
+[`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md#modelos) para limitaciones
+conocidas.
+
+---
+
+## Desarrollo
 
 ```bash
-# 1. Python 3.11 + dependencias
-pip install -r requirements.txt
-
-# 2. Modelos ML (van por Git LFS)
-git lfs pull
-
-# 3. Credenciales (sin esto la app NO arranca):
-#    copiar .streamlit/secrets.toml.example -> .streamlit/secrets.toml
-#    y generar cookie_key + hashes bcrypt con:
-python scripts/gen_credentials.py
-
-# 4. Levantar (desde la raíz del repo: los paths data/, models/, logs/ son relativos)
-streamlit run src/streamlit_app.py
+make dev          # dependencias + ruff + pytest
+make lint
+make test
 ```
 
-En Windows corporativo (proxy + OneDrive): usar `deploy/setup.ps1`, que arma el
-venv fuera de OneDrive e instala con `--trusted-host`.
+- CI en GitHub Actions: ruff + pytest en Python 3.11.
+- `tests/test_simulaciones_negocio.py` reconcilia el motor contra workbooks
+  reales de negociación; como son datos sensibles no se versionan y los tests
+  se saltean sin ellos (ver `tests/fixtures/simulaciones/README.md`).
 
-## Autenticación y seguridad
-
-- Login obligatorio con `streamlit-authenticator` (passwords **hasheados con
-  bcrypt**, nunca en texto plano) definido en `.streamlit/secrets.toml`
-  (gitignoreado; plantilla en `.streamlit/secrets.toml.example`).
-- **Lockout anti fuerza bruta**: 5 intentos fallidos en 10 min → bloqueo 15 min.
-- **Auditoría de login** en JSON Lines: `logs/auth_audit.log` (con IP vía
-  `X-Forwarded-For` detrás de proxy).
-- Datos y secrets fuera del repo (`data/`, `secrets.toml` gitignoreados).
-- Hardening de despliegue (binding, TLS, firewall):
-  [`docs/DESPLIEGUE_SEGURO.md`](docs/DESPLIEGUE_SEGURO.md).
-
-## Despliegue
-
-- **LAN segura (actual):** `deploy/run_secure.ps1` levanta Streamlit en
-  `127.0.0.1` y **Caddy** como reverse proxy TLS en `:8443`
-  (`deploy/Caddyfile`). Ajustar IP/rutas a tu equipo antes de usar.
-- **Docker:** `docker build -t simulador . && docker run -p 8501:8501 ...`
-  La imagen **no incluye** `data/` ni `secrets.toml`: montar volumen e
-  inyectar secrets en runtime. Ojo: `git lfs pull` antes del build para no
-  copiar punteros LFS a la imagen.
-- **Hugging Face Spaces:** soportado por el front-matter de este README
-  (sdk: docker). Requiere `enableCORS/enableXsrfProtection = false` en
-  `.streamlit/config.toml` (hoy endurecido para LAN) y secrets del Space.
-
-## Modelos ML (`models/`)
-
-Modelos pre-entrenados fuera del repo (Colab): 3 **LightGBM** (`.txt`) y 3
-redes **Keras** (`.keras`) — una por métrica (importe, cantidad, precio) — más
-`scalers_pablo.pkl` (**Git LFS**, correr `git lfs pull`) y las métricas de
-entrenamiento en `metricas_*.json`. La app detecta punteros LFS sin resolver y
-avisa en lugar de fallar.
-
-## Stack
-
-Streamlit 1.38 · pandas ≥2.2 / NumPy · Plotly · DuckDB · psycopg2 (Supabase) ·
-scikit-learn 1.6.1 · LightGBM · TensorFlow/Keras **opcional** (`requirements-nn.txt`,
-solo para la comparativa con la red neuronal del Módulo 3) ·
-streamlit-authenticator + bcrypt · openpyxl · requests (API INDEC).
-
-## Desarrollo y calidad
-
-```bash
-pip install -r requirements-dev.txt
-ruff check src tests            # lint
-PYTHONPATH=src pytest tests/ -q # tests
-```
-
-- **CI** en GitHub Actions (`.github/workflows/ci.yml`): ruff + pytest en
-  Python 3.11 para cada push a `main` y PR (instala liviano, sin TF/LightGBM).
-- **Regresión contra simulaciones reales del negocio**
-  (`tests/test_simulaciones_negocio.py`): reconcilia el motor de la app contra
-  workbooks ya resueltos por el equipo de negociación. Los `.xlsx` son datos
-  sensibles y **no se versionan**: ver
-  [`tests/fixtures/simulaciones/README.md`](tests/fixtures/simulaciones/README.md)
-  (o `SIM_FIXTURES_DIR`). Sin los archivos, esos tests se saltean.
-
-## Estructura del repo
+## Estructura
 
 ```
 src/
-├── core/      → lógica pura: datos, simulación, anomalías, ML, auth-support
-├── ui/        → presentación: controles, tabs, tema, formatos es-AR
-├── modules/   → orquestación: una página por módulo
-└── streamlit_app.py → entry point
-scripts/       → ingest.py, gen_credentials.py
-models/        → modelos ML pre-entrenados (LFS para .pkl)
-deploy/        → setup.ps1, run_secure.ps1, Caddyfile
-docs/          → SUPABASE.md, DESPLIEGUE_SEGURO.md
-tests/         → smoke + regresión de negocio + conector remoto
-data/          → (no versionada) DuckDB local, bandeja de ingesta
+├── core/            lógica de dominio: datos, simulación, anomalías, ML, auth
+├── ui/              componentes de presentación, tema y formatos es-AR
+├── modules/         una página por módulo
+└── streamlit_app.py entry point
+scripts/             ingesta, datos de demo, credenciales, healthcheck
+models/              modelos pre-entrenados y métricas
+deploy/k8s/          manifiestos Kubernetes
+deploy/lan/          despliegue on-premise en Windows (Caddy + TLS)
+docker/              entrypoint del contenedor
+docs/                arquitectura, datos, despliegue, Supabase
+tests/               unitarios, ingesta, regresión de negocio
 ```
 
-## Documentación
+## Seguridad
 
-| Documento | Contenido |
-|---|---|
-| [`ARQUITECTURA.md`](ARQUITECTURA.md) | Cómo está armado y plan de evolución |
-| [`FUENTE_DATOS.md`](FUENTE_DATOS.md) | Extracción desde MicroStrategy |
-| [`CÓMO_CORRERLO.md`](CÓMO_CORRERLO.md) | Guía de instalación y ejecución |
-| [`docs/SUPABASE.md`](docs/SUPABASE.md) | Fuente de datos remota (PostgreSQL) |
-| [`docs/DESPLIEGUE_SEGURO.md`](docs/DESPLIEGUE_SEGURO.md) | Hardening del despliegue en LAN |
+- Login obligatorio (`streamlit-authenticator`, contraseñas con bcrypt cost 12).
+- Bloqueo ante fuerza bruta: 5 intentos fallidos en 10 min por usuario
+  (umbral mayor por IP) → 15 min de bloqueo.
+- Auditoría de login en `logs/auth_audit.log` (JSON Lines, con IP vía
+  `X-Forwarded-For`).
+- XSRF y CORS habilitados; credenciales y datos fuera de la imagen.
 
-## Estado y roadmap
-
-- ✅ Fase 0 (limpieza) y Fase 1 (DuckDB local + ingesta) — completadas.
-- ✅ Conector Supabase/PostgreSQL (lectura) con fallback a DuckDB.
-- ✅ CI, auditoría de login, rate-limit, validador de workbooks.
-- ⏭️ Ingesta hacia Supabase; rol read-only en Postgres (hoy la conexión usa
-  `postgres`, que bypasea RLS).
-- ⏭️ Compliance de datos médicos en cloud antes de productivo.
-- ⏭️ Fases 2–3: backend FastAPI + frontend dedicado (ver `ARQUITECTURA.md`).
+Más detalle en [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md#seguridad).

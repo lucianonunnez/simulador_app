@@ -1,9 +1,8 @@
 """
 Tema visual compartido — paleta Swiss Medical y layout base de gráficos.
 
-Centraliza los colores y el layout de Plotly que antes vivían duplicados (o
-directamente ausentes: el Módulo 3 usaba una paleta genérica violeta/azul que
-rompía la identidad visual al navegar entre módulos).
+Centraliza los colores y el layout de Plotly para que los tres módulos
+compartan la misma identidad visual.
 """
 
 from __future__ import annotations

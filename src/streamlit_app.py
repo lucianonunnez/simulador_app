@@ -24,8 +24,7 @@ from ui.formatters import format_int
 from ui.styles import brand_header_sidebar, inject_css
 
 # ============================================================================
-# LOGGING — antes no había NINGÚN logging en la app: un fallo en vivo no
-# dejaba rastro. basicConfig es no-op si ya hay handlers (reruns de Streamlit).
+# LOGGING — basicConfig es no-op si ya hay handlers (reruns de Streamlit).
 # ============================================================================
 logging.basicConfig(
     level=logging.INFO,

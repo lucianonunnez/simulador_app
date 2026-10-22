@@ -1,35 +1,43 @@
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 WORKDIR /app
 
-# Dependencias del sistema (openpyxl/lightgbm pueden requerirlas)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 \
+# libgomp1: runtime de OpenMP que necesita LightGBM.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar requirements primero para cachear la capa.
-# NOTA: tensorflow-cpu NO se instala por default (es opcional, ver
-# requirements-nn.txt): la imagen queda ~950MB más liviana y usar el Módulo 3
-# cuesta ~500MB menos de RAM. El módulo funciona en modo LightGBM; para
-# habilitar la comparativa con la red neuronal, descomentá la línea.
+# tensorflow-cpu NO se instala por default (requirements-nn.txt): suma ~950 MB
+# a la imagen y ~500 MB de RAM. Sin él el Módulo 3 corre en modo LightGBM.
+# Para habilitarlo: docker build --build-arg WITH_NN=true .
+ARG WITH_NN=false
 COPY requirements.txt requirements-nn.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-# RUN pip install --no-cache-dir -r requirements-nn.txt
+RUN pip install -r requirements.txt \
+    && if [ "$WITH_NN" = "true" ]; then pip install -r requirements-nn.txt; fi
 
-# Copiar archivos de la app.
-# OJO: de .streamlit/ solo va config.toml — el secrets.toml JAMÁS entra a la
-# imagen (las credenciales se inyectan en runtime: volumen montado o Secrets
-# del host/Space). .dockerignore refuerza esto por si el COPY se generaliza.
+# De .streamlit/ solo entra config.toml: las credenciales se inyectan en
+# runtime (Secret montado o variables de entorno), nunca en la imagen.
 COPY src/ ./src/
-COPY .streamlit/config.toml ./.streamlit/config.toml
+COPY scripts/ ./scripts/
 COPY models/ ./models/
+COPY .streamlit/config.toml ./.streamlit/config.toml
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# HF Spaces usa el puerto 8501 por default para Streamlit
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p data logs \
+    && chown -R app:app /app \
+    && chmod +x /usr/local/bin/entrypoint.sh
+USER app
+
+VOLUME ["/app/data", "/app/logs"]
 EXPOSE 8501
 
-# Salud + arranque
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD python scripts/healthcheck.py || exit 1
 
-ENTRYPOINT ["streamlit", "run", "src/streamlit_app.py", \
-    "--server.port=8501", \
-    "--server.address=0.0.0.0"]
+ENTRYPOINT ["entrypoint.sh"]

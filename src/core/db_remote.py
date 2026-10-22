@@ -4,7 +4,7 @@ Fuente de datos REMOTA: Supabase (PostgreSQL).
 Es la fuente de verdad cuando la app corre para un equipo / en la web: una sola
 base central, multiusuario, con backups y RLS. Reemplaza a DuckDB local SOLO
 cuando hay configuración de Supabase en los secrets; si no la hay, `data_loader`
-sigue usando DuckDB exactamente como antes (este módulo no se activa).
+usa DuckDB local (este módulo no se activa).
 
 El esquema de tablas es idéntico al de DuckDB (`consumo`, `valores`,
 `_ingest_log`) pero vive en un schema propio de Postgres (por defecto

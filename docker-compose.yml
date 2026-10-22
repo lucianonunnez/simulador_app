@@ -1,0 +1,26 @@
+# Levanta la app en un contenedor con datos sintéticos de demo.
+#
+#   cp .env.example .env      # definir SIMULADOR_PASSWORD
+#   docker compose up --build
+#
+# Abrir http://localhost:8501 (usuario: SIMULADOR_USER, default "admin").
+services:
+  simulador:
+    build:
+      context: .
+      args:
+        WITH_NN: "${WITH_NN:-false}"
+    image: simulador-cm:latest
+    ports:
+      - "${PORT:-8501}:8501"
+    env_file: .env
+    environment:
+      DEMO_DATA: "${DEMO_DATA:-true}"
+    volumes:
+      - simulador-data:/app/data
+      - simulador-logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  simulador-data:
+  simulador-logs:

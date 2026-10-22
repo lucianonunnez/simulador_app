@@ -1,0 +1,25 @@
+# Ejemplo para ingress-nginx. Streamlit usa WebSockets: subir los timeouts
+# para que las sesiones largas no se corten. Ajustar host/TLS al cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simulador-cm
+  labels:
+    app.kubernetes.io/name: simulador-cm
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: simulador.example.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simulador-cm
+                port:
+                  name: http

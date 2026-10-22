@@ -155,8 +155,8 @@ def construir_panel(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     df = df_consumo[["Mes", "Prestador ID", "Prestacion ID",
                      "Cantidad CM", "Importe CM"]].copy()
     # Parser único de meses de la app: tolera 'MM-YYYY', nombres en español
-    # ('Mayo 2026') y datetimes. Antes el formato hardcodeado descartaba en
-    # silencio TODO el dataset si el mes venía en otro formato.
+    # ('Mayo 2026') y datetimes; un formato fijo descartaría en silencio todo
+    # el dataset si el mes viene en otro formato.
     df["mes_dt"] = pd.to_datetime(
         normalize_month_series(df["Mes"]), format="%m-%Y", errors="coerce"
     )
@@ -251,8 +251,8 @@ def construir_features(df_consumo: pd.DataFrame, metric: str) -> pd.DataFrame:
     Panel + lags/rolling + categóricas, todo en uno y cacheado.
 
     Es la parte cara de la predicción (groupby + rolling sobre todo el panel).
-    Antes se rehacía en cada rerun y por cada modelo; cacheada por
-    (datos, métrica) se reusa entre LightGBM y la red, y entre interacciones.
+    Cacheada por (datos, métrica): se reusa entre LightGBM y la red, y entre
+    interacciones.
     """
     panel = construir_panel(df_consumo, metric)
     df_feat = agregar_features(panel)
@@ -302,7 +302,7 @@ def predecir_lightgbm(
         return pd.DataFrame()
 
     # Convertir categóricas.
-    # LIMITACIÓN CONOCIDA (auditoría de cálculos): LightGBM mapea las
+    # LIMITACIÓN CONOCIDA: LightGBM mapea las
     # categóricas por su código entero interno, que depende del set/orden de
     # categorías. Acá se derivan del dataset actual; si difiere del set de
     # entrenamiento, los códigos pueden no coincidir y sesgar la predicción

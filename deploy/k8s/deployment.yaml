@@ -1,0 +1,82 @@
+# Una sola réplica a propósito: DuckDB admite un único proceso escritor por
+# archivo y el lockout de login vive en memoria del proceso. Para escalar
+# horizontalmente usar la fuente PostgreSQL (SUPABASE_DATABASE_URL) y
+# sesiones afines (sticky) en el ingress.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulador-cm
+  labels:
+    app.kubernetes.io/name: simulador-cm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: simulador-cm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: simulador-cm
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: simulador
+          image: simulador-cm:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8501
+          envFrom:
+            - secretRef:
+                name: simulador-credentials
+          env:
+            - name: DEMO_DATA
+              value: "true"
+            # - name: STREAMLIT_SERVER_BASE_URL_PATH
+            #   value: simulador
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+            # - name: secrets-toml
+            #   mountPath: /app/.streamlit/secrets.toml
+            #   subPath: secrets.toml
+            #   readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: simulador-data
+        - name: logs
+          emptyDir: {}
+        # - name: secrets-toml
+        #   secret:
+        #     secretName: simulador-secrets-toml

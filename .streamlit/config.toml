@@ -16,15 +16,14 @@ font = "sans serif"
 # por archivos gigantes (openpyxl descomprime todo en RAM).
 maxUploadSize = 50
 
-# DESPLIEGUE LOCAL EN LA LAN (configuración actual, ver docs/DESPLIEGUE_SEGURO.md).
-# Al servir por IP en la red corporativa, estas protecciones DEBEN estar activas:
-# son la defensa contra CSRF y contra peticiones cross-origin maliciosas.
+# Protección contra CSRF y peticiones cross-origin. Deben quedar activas en
+# cualquier despliegue; ver docs/DESPLIEGUE.md si un proxy rompe los tokens XSRF.
 enableCORS = true
 enableXsrfProtection = true
 
-# NOTA: si en algún momento se despliega en Hugging Face Spaces (proxy + Docker),
-# ambas deben ir en false porque el proxy de HF no reenvía bien los tokens XSRF
-# (provoca 403 en st.file_uploader). Pero para correr local en la LAN, van en true.
-
 [browser]
 gatherUsageStats = false
+
+[client]
+# Oculta el menú de desarrollo de Streamlit (botón "Deploy", rerun, etc.).
+toolbarMode = "minimal"

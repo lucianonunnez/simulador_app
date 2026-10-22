@@ -278,7 +278,7 @@ def test_merge_match_rate_detecta_tarifario_ajeno():
 
 
 def test_merge_coverage_por_importe_no_se_enmascara():
-    """Hallazgo de la base real: 98% de filas con tarifa pero solo 73% del
+    """Caso real: 98% de filas con tarifa pero solo 73% del
     dinero. La cobertura por importe debe revelar lo que la de filas oculta."""
     consumo = pd.DataFrame({
         "Prestador ID": [1, 1], "Convenio ID": [1, 1],
@@ -297,8 +297,8 @@ def test_merge_coverage_por_importe_no_se_enmascara():
 
 
 def test_dedup_vigencia_con_meses_en_espanol():
-    """Hallazgo de la base real: 80% de las vigencias son texto en español
-    ("Septiembre 2024") y caían a NaT -> la 'vigencia más reciente' quedaba
+    """En la base real el 80% de las vigencias son texto en español
+    ("Septiembre 2024"); con formato fijo caen a NaT -> la 'vigencia más reciente' quedaba
     arbitraria. El dedup debe resolverlas con el parser único."""
     consumo = pd.DataFrame({
         "Prestador ID": [1], "Convenio ID": [1],
@@ -599,7 +599,7 @@ def test_clean_dataset_descarta_filas_duplicadas_exactas():
 
 def test_clean_dataset_ids_con_coma_de_miles_no_pierden_filas():
     """Regresión: 'Prestador ID' = '1,130 ' como texto no debe volverse NaN
-    (antes to_numeric directo lo descartaba junto con toda la fila)."""
+    (un to_numeric directo lo descarta junto con toda la fila)."""
     df = pd.DataFrame({
         "Prestador ID": ["1,130 ", "Total"],
         "Mes": ["01-2025", None],

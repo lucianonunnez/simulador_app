@@ -9,13 +9,26 @@ pegar en secrets.toml (que es local y está gitignored).
 Uso:
     python scripts/gen_credentials.py              # asistente interactivo
     python scripts/gen_credentials.py --cookie-key # solo un cookie_key nuevo
+    python scripts/gen_credentials.py --from-env   # escribe secrets.toml desde variables
+
+Modo --from-env (contenedores / cluster): crea .streamlit/secrets.toml con un
+único usuario a partir de las variables de entorno
+    SIMULADOR_USER       (default: admin)
+    SIMULADOR_PASSWORD   (obligatoria)
+    SIMULADOR_NAME       (opcional)
+    SIMULADOR_COOKIE_KEY (opcional; si falta se genera una aleatoria)
+Si el archivo ya existe (p. ej. montado como Secret) no lo toca.
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
+import json
+import os
+import re
 import secrets
+from pathlib import Path
 
 try:
     import bcrypt
@@ -75,6 +88,37 @@ def _interactive() -> int:
     return 0
 
 
+def _from_env(path: Path) -> int:
+    if path.exists():
+        print(f"{path} ya existe: se usa tal cual.")
+        return 0
+    password = os.environ.get("SIMULADOR_PASSWORD")
+    if not password:
+        print(f"Falta {path} y no está definida SIMULADOR_PASSWORD: "
+              "montá el secrets.toml o definí las variables de entorno.")
+        return 1
+    username = os.environ.get("SIMULADOR_USER", "admin")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
+        print("SIMULADOR_USER solo admite letras, números, '_' y '-'.")
+        return 1
+    name = os.environ.get("SIMULADOR_NAME", username)
+    cookie_key = os.environ.get("SIMULADOR_COOKIE_KEY") or gen_cookie_key()
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'cookie_key = "{cookie_key}"\n'
+        'cookie_name = "simulador_cm_auth"\n'
+        "cookie_expiry_days = 1\n\n"
+        f"[credentials.usernames.{username}]\n"
+        f"name = {json.dumps(name, ensure_ascii=False)}\n"
+        f'password = "{hash_password(password)}"\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    print(f"{path} generado para el usuario '{username}'.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Genera credenciales para secrets.toml")
     ap.add_argument(
@@ -82,7 +126,21 @@ def main() -> int:
         action="store_true",
         help="Solo imprime un cookie_key nuevo y sale",
     )
+    ap.add_argument(
+        "--from-env",
+        action="store_true",
+        help="Escribe .streamlit/secrets.toml desde variables de entorno",
+    )
+    ap.add_argument(
+        "--path",
+        type=Path,
+        default=Path(".streamlit") / "secrets.toml",
+        help="Destino para --from-env (default: .streamlit/secrets.toml)",
+    )
     args = ap.parse_args()
+
+    if args.from_env:
+        return _from_env(args.path)
 
     if args.cookie_key:
         print(gen_cookie_key())

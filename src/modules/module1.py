@@ -81,7 +81,7 @@ def _render_cobertura_y_tarifario(df_consumo: pd.DataFrame, df_merged: pd.DataFr
     Cobertura del merge (por FILAS y por IMPORTE) + vigencia del tarifario.
 
     El inner join descarta en silencio el consumo sin tarifa: medir solo filas
-    enmascara cuánta plata queda FUERA de la simulación (hallazgo real: ~98% de
+    enmascara cuánta plata queda FUERA de la simulación (en datos reales: ~98% de
     filas con tarifa pero ~73% del importe). Acá se hace visible. Además se
     muestra a qué 'Mes Vigencia' corresponde el tarifario que se está usando,
     para que no haya confusión cuando los $ no calzan con un workbook viejo.

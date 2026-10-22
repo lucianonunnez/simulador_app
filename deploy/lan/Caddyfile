@@ -5,7 +5,7 @@
 # Además inyecta X-Forwarded-For automáticamente -> la auditoría de login
 # (src/core/audit.py) puede registrar la IP real del cliente.
 #
-# IMPORTANTE: reemplazar 10.11.45.103 por la IP real de tu notebook en la red
+# IMPORTANTE: reemplazar 192.0.2.10 por la IP real de tu notebook en la red
 # (averiguala con `ipconfig`). El puerto 8443 es el HTTPS de la app.
 # ============================================================================
 {
@@ -15,7 +15,7 @@
 	admin off
 }
 
-https://10.11.45.103:8443 {
+https://192.0.2.10:8443 {
 	# Certificado emitido por la CA interna de Caddy (válido para esta IP).
 	tls internal
 

@@ -28,7 +28,7 @@ def _client_ip() -> str:
     """
     IP del cliente, best-effort.
 
-    Detrás de un reverse proxy (lo recomendado, ver docs/DESPLIEGUE_SEGURO.md)
+    Detrás de un reverse proxy (lo recomendado, ver docs/DESPLIEGUE.md)
     llega en X-Forwarded-For. Sirviendo HTTP plano en la LAN, Streamlit no expone
     de forma confiable la IP del socket, así que puede quedar "unknown".
     """

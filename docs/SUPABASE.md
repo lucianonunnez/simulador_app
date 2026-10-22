@@ -1,4 +1,4 @@
-# 🟢 Fuente de datos: Supabase (PostgreSQL)
+# Fuente de datos: Supabase / PostgreSQL
 
 La app puede leer los datos desde **Supabase** (Postgres en la nube) en vez de
 la base **DuckDB local**. Supabase es la **fuente de verdad** cuando la app la
@@ -6,7 +6,7 @@ usa un **equipo** o se publica en la **web**: una sola base central,
 multiusuario, con backups y RLS.
 
 > **Es opcional y no invasivo.** Si NO hay bloque `[supabase]` en los secrets,
-> la app usa DuckDB local exactamente como antes. El conector remoto ni se
+> la app usa DuckDB local y el conector remoto ni se
 > importa. Podés alternar entre local y nube solo agregando/quitando ese bloque.
 
 ## Cómo está armado

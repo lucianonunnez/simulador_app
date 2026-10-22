@@ -12,7 +12,7 @@ Uso desde streamlit_app.py:
 Gestión de usuarios:
     Editar .streamlit/secrets.toml (local, gitignored). Para generar el hash
     bcrypt de un password y un cookie_key: python scripts/gen_credentials.py
-    Ver README.md y docs/DESPLIEGUE_SEGURO.md.
+    Ver README.md y docs/DESPLIEGUE.md.
 """
 
 import logging
@@ -58,10 +58,10 @@ def _instalar_lockout(authenticator: stauth.Authenticate) -> None:
     Envuelve check_credentials para aplicar el lockout REAL.
 
     streamlit-authenticator no expone el username intentado cuando el login
-    falla (solo lo guarda en session_state si es correcto), así que antes la
-    clave del lockout salía de la sesión ANTERIOR: bastaba abrir una sesión
-    nueva por intento para evadirlo. Acá se intercepta el chequeo de
-    credenciales, el único punto donde el username intentado SÍ se conoce:
+    falla (solo lo guarda en session_state si es correcto); tomar la clave del
+    lockout de la sesión permitiría evadirlo abriendo una sesión nueva por
+    intento. Por eso se intercepta el chequeo de credenciales, el único punto
+    donde el username intentado SÍ se conoce:
       - si el username o la IP están bloqueados, se rechaza ANTES de validar
         la contraseña (aunque sea correcta: no entra ni se emite cookie);
       - cada submit fallido REAL (no los reruns) registra el fallo en ambos
@@ -96,9 +96,9 @@ def _build_authenticator() -> stauth.Authenticate:
         cookie_name = "simulador_cm_auth"
         cookie_expiry_days = 1
 
-        [credentials.usernames.luciano]
-        name = "Luciano Núñez"
-        email = "luciano@ejemplo.com"
+        [credentials.usernames.jperez]
+        name = "Juan Pérez"
+        email = "jperez@example.com"
         password = "$2b$12$..."   # hash bcrypt
     """
     # Acceder a st.secrets cuando NO existe .streamlit/secrets.toml lanza
@@ -252,14 +252,13 @@ def get_current_user() -> dict:
 
     Returns:
         {
-            "username": str,   # el "luciano"
-            "name": str,       # el "Luciano Núñez"
+            "username": str,   # ej. "jperez"
+            "name": str,       # ej. "Juan Pérez"
         }
 
-    Nota: el campo "role" se eliminó a propósito. Ningún módulo autorizaba
-    nada con él, así que daba una falsa sensación de control de acceso
-    (hallazgo de la auditoría de seguridad). Si en el futuro hay acciones
-    que requieran privilegios, reintroducirlo junto con el gate real.
+    No hay campo "role": ningún módulo autoriza por rol, y exponerlo daría una
+    falsa sensación de control de acceso. Si en el futuro hay acciones que
+    requieran privilegios, agregarlo junto con el chequeo correspondiente.
     """
     return {
         "username": st.session_state.get("username", ""),

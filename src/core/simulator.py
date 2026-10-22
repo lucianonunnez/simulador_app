@@ -23,13 +23,11 @@ MERGE_KEYS = ["Prestador ID", "Convenio ID", "Prestacion ID"]
 VALORES_MES_COL = "Mes Vigencia"
 
 # Ámbito de la prestación (Internación / Ambulatorio). Una MISMA prestación
-# puede tener distinto valor según el ámbito (hallazgo de la simulación real
-# del Hospital Italiano: "una prestación puede tener distinto valor en
-# internación vs ambulatorio, y no sale lo mismo"). Cuando tanto el consumo
-# como el tarifario traen esta columna, se suma a la clave de merge para no
-# colapsar los dos valores en uno. Si el tarifario NO la trae (caso actual:
-# el export de valores no incluye el ámbito), el merge se comporta igual que
-# antes — es un agregado retrocompatible.
+# puede tener distinto valor según el ámbito. Cuando tanto el consumo como el
+# tarifario traen esta columna, se suma a la clave de merge para no colapsar
+# los dos valores en uno. Si el tarifario NO la trae (caso actual:
+# el export de valores no incluye el ámbito), el merge usa la clave sin
+# ámbito (retrocompatible).
 AMBITO_COL = "Tipo Clase CM"
 
 
@@ -92,9 +90,8 @@ def _dedup_vigencia(df_valores: pd.DataFrame, keys: list[str] | None = None) -> 
 
     tmp = df_valores.copy()
     # Parser único de meses: la base real tiene vigencias viejas como texto en
-    # español ("Septiembre 2024") ingeridas antes de la normalización — con el
-    # formato fijo caían a NaT y la "vigencia más reciente" quedaba arbitraria
-    # (hallazgo de la auditoría sobre la base real: 80% de las vigencias).
+    # español ("Septiembre 2024"); con un formato fijo caerían a NaT y la
+    # "vigencia más reciente" quedaría arbitraria.
     from core.excel_utils import normalize_month_series
 
     tmp["_vig_dt"] = pd.to_datetime(
@@ -202,8 +199,7 @@ def merge_coverage(df_consumo: pd.DataFrame, df_merged: pd.DataFrame) -> dict:
     """
     Cobertura del merge por FILAS y por IMPORTE.
 
-    Hallazgo de la auditoría sobre la base real: la cobertura por filas era
-    97,9% pero por dinero solo 73% — el 2% de filas sin tarifa concentraba el
+    En la base real la cobertura por filas es ~98% pero por dinero solo ~73% — el 2% de filas sin tarifa concentraba el
     27% del importe (Medicamentos, "No Asignado": el universo "No pauta" del
     negocio). Medir solo filas enmascara cuánta plata queda fuera de la
     simulación; la UI debe mostrar ambas.

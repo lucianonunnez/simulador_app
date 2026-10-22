@@ -78,7 +78,7 @@ def _cols_tabla(con, tabla: str) -> list:
 def test_primer_archivo_parcial_no_amputa_el_esquema(con):
     """Tabla creada desde un df SIN 'Tipo Clase CM': debe nacer con la unión
     del df + el contrato, y el archivo completo posterior conserva su valor
-    (antes se descartaba en silencio y se apagaba el merge por ámbito)."""
+    (no se descarta en silencio ni se apaga el merge por ámbito)."""
     parcial = pd.DataFrame({
         "Prestador ID": [1], "Mes": ["01-2025"],
         "Prestacion ID": [100], "Cantidad CM": [5], "Importe CM": [500.0],

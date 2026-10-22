@@ -1,12 +1,11 @@
 """
 Carga de datos de consumo y valores desde DuckDB (local).
 
-Antes esto leía los Excel ENTEROS a RAM con pandas en cada sesión. Ahora los
-datos viven en una base DuckDB local (data/simulador.duckdb), construida por
+Los datos viven en una base DuckDB local (data/simulador.duckdb), construida por
 scripts/ingest.py a partir de los Excel descargados manualmente de
 MicroStrategy. Las consultas piden solo lo necesario (filtros opcionales por
 prestador y mes), así que:
-  - La RAM usada es una fracción de la de antes.
+  - La RAM usada es acotada aunque la base crezca.
   - Nada sale de la máquina (datos médicos sensibles -> todo local).
 
 Si la base todavía no existe (checkout nuevo, sin datos ingeridos), cae a un
@@ -60,9 +59,8 @@ def _db_fingerprint() -> str:
     Identidad del estado de la base (mtime + tamaño del archivo).
 
     Se pasa como argumento de las funciones cacheadas: cuando la ingesta
-    reescribe la base, el fingerprint cambia y el caché se invalida solo.
-    Antes, los datos recién ingeridos tardaban hasta 10 min (el TTL) en
-    aparecer en la app.
+    reescribe la base, el fingerprint cambia y el caché se invalida solo, sin
+    esperar el TTL.
 
     Con Supabase configurado, la identidad viene de la base remota.
     """
@@ -80,8 +78,8 @@ def _get_ro_connection():
     """
     Conexión de solo-lectura cacheada (DuckDB admite múltiples lectores).
 
-    Antes se abría y cerraba una conexión por consulta y por rerun: frágil y
-    más lento. La conexión cacheada se renueva sola cada 10 min (ttl).
+    Evita abrir y cerrar una conexión por consulta y por rerun. Se renueva
+    sola cada 10 min (ttl).
     """
     return get_connection(read_only=True)
 
@@ -147,10 +145,9 @@ def _query_table(
     """
     Wrapper NO cacheado de _query_table_cached: maneja el error del rerun.
 
-    Antes el try/except vivía DENTRO de la función cacheada y devolvía None:
-    st.cache_data cacheaba ese None (y el st.error solo se veía en el primer
-    rerun) → un lock transitorio de ingesta dejaba la app "sin datos" y sin
-    mensaje hasta 10 minutos. Con el error fuera del caché, el fallo afecta
+    El manejo de errores queda FUERA de la función cacheada: si devolviera None
+    adentro, st.cache_data cachearía ese None y un lock transitorio de ingesta
+    dejaría la app "sin datos" hasta que venza el TTL. Así el fallo afecta
     solo a este rerun y el mensaje se muestra siempre.
     """
     try:
@@ -172,7 +169,7 @@ def _query_table(
         return None
 
 
-# NOTA sobre concurrencia (bug visto en vivo): la conexión cacheada con
+# NOTA sobre concurrencia: la conexión cacheada con
 # st.cache_resource se COMPARTE entre los hilos de las sesiones de Streamlit,
 # y una conexión DuckDB no es thread-safe — dos consultas simultáneas se
 # pisaban y fetchone() devolvía None ("cannot unpack non-iterable NoneType").
@@ -327,7 +324,7 @@ def _render_ingesta_pendiente() -> None:
             "cada uno — el que quede vacío NO se ingiere todavía. "
             "⚠️ Solo válido para descargas de UN mes: si el archivo abarca "
             "varios meses, pedí el export CON la columna 'Mes' "
-            "(ver FUENTE_DATOS.md §9)."
+            "(ver docs/DATOS.md)."
         )
         import re as _re
 
@@ -552,9 +549,8 @@ def load_consumo_and_valores(
 # TRANSFORMACIONES CACHEADAS
 # ============================================================================
 # El merge y la normalización de tipos son pesados (to_numeric sobre todo el
-# dataset + pd.merge). Antes corrían en CADA rerun de Streamlit -> el indicador
-# de "Procesando datos..." reaparecía a cada interacción (el "parpadeo"). Acá
-# se cachean: solo se recalculan cuando cambian los datos de entrada.
+# dataset + pd.merge). Se cachean para no recalcularlos en cada rerun de
+# Streamlit: solo se rehacen cuando cambian los datos de entrada.
 
 @st.cache_data(ttl=600, show_spinner=False, hash_funcs={pd.DataFrame: df_fingerprint})
 def get_merged_dataset(
